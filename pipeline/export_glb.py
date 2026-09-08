@@ -140,12 +140,7 @@ if __name__ == "__main__":
     # El volumen del peinado sólo se lee como pelo si el material lo distingue:
     # en piedra clara y sin textura, un casquete algo más grueso parece cráneo.
     from hair_volume import _suavizar_campo, peso_cuero
-    caras_lmk = m["f"][m["lmk_faces_idx"].astype(int)]
-    lmk3d = np.einsum("ijk,ij->ik", base[caras_lmk], m["lmk_bary_coords"])
-    peso = peso_cuero(base, float(lmk3d[17:27, 1].mean()), float(base[:, 1].max()))
-    # El borde del peinado sigue la malla vértice a vértice y sale dentado como
-    # una sierra. Suavizarlo sobre la superficie lo convierte en un contorno.
-    peso = _suavizar_campo(peso[:, None], m["f"], pasos=6)[:, 0]
+    peso = peso_cuero(m)   # ya viene suavizado sobre la superficie
     # En espacio LINEAL, que es como glTF interpreta COLOR_0: un 0,42 lineal se
     # muestra como 0,68 en pantalla, y el contraste se pierde. Estos valores
     # equivalen a ~0,87 y ~0,35 en sRGB.

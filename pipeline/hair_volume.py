@@ -83,17 +83,25 @@ def _reparar(contorno: np.ndarray, confianza: np.ndarray,
     return ndimage.gaussian_filter1d(lleno, 2.0, mode="nearest")
 
 
-def peso_cuero(v: np.ndarray, y_cejas: float, y_coronilla: float,
-               inicio: float = 0.15, pleno: float = 0.45) -> np.ndarray:
+def peso_cuero(m: dict, caras: np.ndarray | None = None,
+               pasos: int = 5) -> np.ndarray:
     """0 en la cara, 1 en el cuero cabelludo, con transición suave.
 
-    La frontera va en fracciones del tramo cejas→coronilla, no de la altura
-    total de la malla: esa incluye el cuello, y medir desde ahí desplaza el
-    nacimiento del pelo por encima de la cabeza, dejando el peso a cero.
+    Usa la máscara `scalp` de FLAME, que es la región anatómica real: su borde
+    frontal sigue el arco del nacimiento del pelo en vez de una horizontal. Una
+    frontera por altura, que es lo que había antes, corta recto y deja un
+    flequillo de tazón.
+
+    Del cuero cabelludo se descuenta lo que solapa con el cuello —109 de los 489
+    vértices bajan hasta la nuca— porque su peinado va recogido y no cae sobre
+    él.
     """
-    alto = y_coronilla - y_cejas
-    t = np.clip((v[:, 1] - (y_cejas + inicio * alto)) / ((pleno - inicio) * alto), 0.0, 1.0)
-    return t * t * (3 - 2 * t)  # smoothstep
+    n = len(m["v_template"])
+    peso = np.zeros(n)
+    peso[m["mask_scalp"]] = 1.0
+    peso[m["mask_neck"]] = 0.0
+    caras = m["f"] if caras is None else caras
+    return np.clip(_suavizar_campo(peso[:, None], caras, pasos)[:, 0], 0.0, 1.0)
 
 
 def engrosar(v: np.ndarray, caras: np.ndarray, p2: np.ndarray, centro: np.ndarray,
@@ -164,11 +172,7 @@ def aplicar(m: dict, beta: np.ndarray, camara: np.ndarray, foto: Path,
     crudo, confianza = contorno_pelo(foto, centro, interocular)
     radio_pelo = _reparar(crudo, confianza)
 
-    # las cejas salen de los landmarks 3D del propio modelo (17-26 en dlib68)
-    caras_lmk = m["f"][m["lmk_faces_idx"].astype(int)]
-    lmk3d = np.einsum("ijk,ij->ik", v[caras_lmk], m["lmk_bary_coords"])
-    y_cejas = float(lmk3d[17:27, 1].mean())
-    peso = peso_cuero(v, y_cejas, float(v[:, 1].max()))
+    peso = peso_cuero(m)
 
     escala = camara[0]
     nuevo = engrosar(v, m["f"], p2, centro, radio_pelo, escala, peso)
