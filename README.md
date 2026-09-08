@@ -63,16 +63,23 @@ pero impide automatizar la descarga. Deja en `assets/flame/`:
 ```bash
 uv run python pipeline/convert_flame.py --inspeccionar   # ver qué trae el .pkl
 uv run python pipeline/convert_flame.py                  # -> assets/flame/flame.npz
-uv run python pipeline/fit_face.py assets/fotos/gabriela-referencia.png --preview
+uv run python pipeline/fit_face.py assets/fotos/mistral-1946-frontal.jpg --preview
 ```
 
 El `--preview` deja en `/tmp/ajuste.png` la comparación entre los landmarks de la
 foto (verde) y los del modelo ajustado (magenta). **Míralo antes de seguir**: si no
 se reconoce, sube `REGULARIZACION` en `fit_face.py` o consigue una foto mejor.
 
-La foto incluida es de 250×331 en blanco y negro, que es poco. La Biblioteca
-Nacional Digital de Chile y Memoria Chilena tienen material de dominio público en
-mejor resolución.
+La referencia es `assets/fotos/mistral-1946-frontal.jpg` (1946, Marcos Chamúdez,
+dominio público): 170 px entre ojos y encuadre frontal, contra los 37 px de la
+foto original. Procedencia, atribución obligatoria y las candidatas descartadas
+—con el motivo de cada descarte— están en `assets/fotos/PROCEDENCIA.md`.
+
+Al elegir otra foto, mide los píxeles útiles de cara y no la resolución del
+archivo: un escaneo de 4000 px donde ella sale de cuerpo entero aporta menos que
+uno de 1700 px encuadrado en el rostro. Y **no mezcles épocas**: FLAME ajusta
+forma facial, así que una foto de juventud y otra de vejez se promedian en una
+cara que no es ninguna de las dos.
 
 ### 3. Exportar
 
@@ -84,7 +91,7 @@ entero**.
 
 ```bash
 uv run python tests/test_visemes.py                          # lógica de visemas
-uv run python pipeline/landmarks.py assets/fotos/gabriela-referencia.png
+uv run python pipeline/landmarks.py assets/fotos/mistral-1946-frontal.jpg
 uv run python -m gabriela.chat "¿Quién eres?"                # solo texto
 uv run python -m gabriela.voice "Hola" --out /tmp/g.wav      # solo voz
 uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
