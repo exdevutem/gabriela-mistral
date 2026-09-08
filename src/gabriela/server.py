@@ -19,6 +19,19 @@ app.mount("/assets", StaticFiles(directory=ASSETS), name="assets")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 
+@app.middleware("http")
+async def sin_cache(peticion, siguiente):
+    """Evita que el navegador sirva de caché el .glb o los módulos JS.
+
+    Regenerar el modelo y ver la versión anterior en pantalla cuesta más tiempo
+    de diagnóstico del que ahorra la caché en una aplicación que se sirve en
+    local.
+    """
+    respuesta = await siguiente(peticion)
+    respuesta.headers["Cache-Control"] = "no-store"
+    return respuesta
+
+
 @app.get("/")
 def inicio() -> FileResponse:
     return FileResponse(WEB / "index.html")
