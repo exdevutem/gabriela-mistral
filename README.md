@@ -56,6 +56,10 @@ pero impide automatizar la descarga. Deja en `assets/flame/`:
 
 - el modelo (`flame2023.pkl` o equivalente)
 - `landmark_embedding.npy` del mismo paquete
+- `FLAME_masks.pkl`, que trae las regiones semánticas (cuero cabelludo, cara,
+  cuello, orejas). Sin él el cuero cabelludo hay que deducirlo por altura, y el
+  borde del peinado sale recto como un flequillo de tazón en lugar de seguir el
+  arco del nacimiento del pelo.
 
 ### 2. Convertir y ajustar
 
@@ -131,9 +135,14 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 
 ## Pendiente
 
-- **Cabello**: FLAME no trae pelo, y el suyo, recogido, es media identificación.
-  Ahora mismo la cabeza sale calva.
+- **Cabello**: resuelto a medias. El cráneo se engrosa hasta la silueta del
+  peinado medida en la foto y se colorea aparte, lo que da volumen y un borde
+  que sigue el nacimiento del pelo. Pero es un volumen liso: no hay raya, ondas
+  ni mechones, y cubre las orejas más de lo que debería.
 - **Ojos**: la malla trae globos oculares sin textura, que se leen como huecos.
+- **Edad**: el modelo sale más joven que ella. FLAME no modela arrugas, surcos
+  ni párpados caídos, y las cejas —muy marcadas en su cara— no existen en la
+  malla. Eso pesa en el parecido tanto como la geometría.
 - **Parecido**: el ajuste monocular sólo observa 51 landmarks frontales, así que
   recupera proporciones, no rasgos finos. Una segunda vista de perfil ayudaría,
   pero no hay ninguna en dominio público con resolución suficiente.
