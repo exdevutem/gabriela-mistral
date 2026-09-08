@@ -29,7 +29,12 @@ export async function crearAvatar(canvas) {
   escena.add(raiz);
 
   let malla = null;
-  raiz.traverse((o) => { if (o.isMesh && o.morphTargetInfluences) malla = o; });
+  raiz.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.morphTargetInfluences) malla = o;
+    // GLTFLoader no activa vertexColors si el material se creó sin ellos
+    if (o.geometry.attributes.color) o.material.vertexColors = true;
+  });
   if (!malla) throw new Error('el GLB no trae morph targets');
   const indices = malla.morphTargetDictionary;
   const nombres = Object.keys(indices);
