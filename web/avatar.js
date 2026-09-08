@@ -9,8 +9,7 @@ export async function crearAvatar(canvas) {
   const escena = new THREE.Scene();
   escena.background = new THREE.Color(0x14100e);
 
-  const camara = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
-  camara.position.set(0, 0.05, 4.6);
+  const camara = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
 
   const render = new THREE.WebGLRenderer({ canvas, antialias: true });
   render.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -35,11 +34,24 @@ export async function crearAvatar(canvas) {
   const indices = malla.morphTargetDictionary;
   const nombres = Object.keys(indices);
 
+  // Encuadre automático: FLAME viene en metros (la cabeza mide unos 20 cm) y el
+  // esferoide de prueba medía ~2 unidades. Deducir la distancia del propio modelo
+  // evita una constante que hay que recordar cambiar con cada malla nueva.
+  const caja = new THREE.Box3().setFromObject(raiz);
+  const medida = caja.getSize(new THREE.Vector3());
+  const centro = caja.getCenter(new THREE.Vector3());
+  const alcance = Math.max(medida.x, medida.y, medida.z);
+  const distancia = alcance / (2 * Math.tan((camara.fov * Math.PI / 180) / 2)) * 1.6;
+  raiz.position.sub(centro);                      // centrar en el origen
+  const alturaBase = raiz.position.y;             // la respiración se suma a esto
+  camara.position.set(0, alcance * 0.04, distancia);
+  camara.updateProjectionMatrix();
+
   const controles = new OrbitControls(camara, canvas);
   controles.target.set(0, 0, 0);
   controles.enablePan = false;
-  controles.minDistance = 2.5;
-  controles.maxDistance = 8;
+  controles.minDistance = distancia * 0.4;
+  controles.maxDistance = distancia * 2.5;
 
   const objetivo = new Float32Array(malla.morphTargetInfluences.length);
   let pista = null, audio = null, cursor = 0, manual = false;
@@ -81,7 +93,7 @@ export async function crearAvatar(canvas) {
     // escuchando. Frecuencias primas para que el vaivén no se sienta cíclico.
     raiz.rotation.y = Math.sin(t * 0.31) * DERIVA + Math.sin(t * 0.13) * DERIVA * 0.6;
     raiz.rotation.x = Math.sin(t * 0.23) * DERIVA * 0.5;
-    raiz.position.y = Math.sin(t * 0.7) * 0.006;  // respiración
+    raiz.position.y = alturaBase + Math.sin(t * 0.7) * alcance * 0.003;  // respiración
 
     render.render(escena, camara);
   }
