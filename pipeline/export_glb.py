@@ -112,12 +112,23 @@ if __name__ == "__main__":
     beta = np.load(raiz / "assets" / "flame" / "ajuste.npz")["beta"]
 
     base = evaluar(m, beta)
+    # El peinado sólo cambia la geometría de reposo: no se mueve al hablar, así
+    # que el mismo desplazamiento se aplica a todos los visemas y los deltas de
+    # los morph targets salen idénticos. Basta con sustituir la base.
+    con_pelo = raiz / "assets" / "flame" / "vertices_con_pelo.npy"
+    desplazamiento = 0.0
+    if con_pelo.exists():
+        desplazamiento = np.load(con_pelo) - base
+        base = base + desplazamiento
+        print(f"  peinado aplicado: {np.linalg.norm(desplazamiento, axis=1).max()*1000:.1f} mm máx")
+
     morphs = {}
     for nombre, cfg in cargar_visemas(raiz / "assets" / "visemes.json").items():
         psi = np.zeros(100)
         for i, valor in cfg.get("psi", {}).items():
             psi[int(i)] = valor
-        morphs[nombre] = evaluar(m, beta, psi=psi, pose=pose_mandibula(cfg["mandibula"]))
+        morphs[nombre] = evaluar(m, beta, psi=psi,
+                                 pose=pose_mandibula(cfg["mandibula"])) + desplazamiento
 
     destino = escribir_glb(base, m["f"], morphs, raiz / "assets" / "gabriela.glb")
     tam = destino.stat().st_size / 1e6
