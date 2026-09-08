@@ -139,20 +139,24 @@ if __name__ == "__main__":
 
     # El volumen del peinado sólo se lee como pelo si el material lo distingue:
     # en piedra clara y sin textura, un casquete algo más grueso parece cráneo.
-    from hair_volume import _suavizar_campo, peso_cuero
-    peso = peso_cuero(m)   # ya viene suavizado sobre la superficie
-    # En espacio LINEAL, que es como glTF interpreta COLOR_0: un 0,42 lineal se
-    # muestra como 0,68 en pantalla, y el contraste se pierde. Estos valores
-    # equivalen a ~0,87 y ~0,35 en sRGB.
-    PIEL = np.array([0.72, 0.68, 0.62])
-    PELO = np.array([0.10, 0.095, 0.10])
-    # transición más corta: un degradado largo lee como manchа, no como peinado
-    borde = np.clip((peso - 0.15) / 0.35, 0.0, 1.0)
-    rgb = PIEL + (PELO - PIEL) * (borde * borde * (3 - 2 * borde))[:, None]
-    colores = np.concatenate([rgb, np.ones((len(rgb), 1))], axis=1)
+    # Lo mismo vale para los ojos, que sin color son huecos, y para las cejas,
+    # que FLAME no modela en absoluto.
+    from hair_volume import peso_cuero
+    from rasgos import colores as colores_por_vertice
+    from rasgos import peso_cejas, relieve_cejas
+
+    peso_pelo = peso_cuero(m)          # ya viene suavizado sobre la superficie
+    peso_ceja = peso_cejas(m, base)
+
+    # El relieve de la ceja va también en los visemas: es geometría estática,
+    # como el peinado, y debe acompañar a la malla en todas sus poses.
+    ceja3d = relieve_cejas(base, peso_ceja, _normales(base, m["f"]))
+    base = base + ceja3d
+    for nombre in morphs:
+        morphs[nombre] = morphs[nombre] + ceja3d
 
     destino = escribir_glb(base, m["f"], morphs, raiz / "assets" / "gabriela.glb",
-                           colores=colores)
+                           colores=colores_por_vertice(m, base, peso_pelo, peso_ceja))
     tam = destino.stat().st_size / 1e6
     print(f"{destino} ({tam:.1f} MB)")
     print(f"  {len(base)} vértices, {len(m['f'])} caras, {len(morphs)} visemas")
