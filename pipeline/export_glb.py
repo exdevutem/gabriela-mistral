@@ -94,3 +94,35 @@ def escribir_glb(
     salida.parent.mkdir(parents=True, exist_ok=True)
     modelo.save_binary(str(salida))
     return salida
+
+
+def cargar_visemas(ruta: Path) -> dict:
+    import json
+    return json.loads(ruta.read_text())["visemas"]
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from flame import cargar, evaluar, pose_mandibula
+
+    raiz = Path(__file__).parents[1]
+    m = cargar()
+    beta = np.load(raiz / "assets" / "flame" / "ajuste.npz")["beta"]
+
+    base = evaluar(m, beta)
+    morphs = {}
+    for nombre, cfg in cargar_visemas(raiz / "assets" / "visemes.json").items():
+        psi = np.zeros(100)
+        for i, valor in cfg.get("psi", {}).items():
+            psi[int(i)] = valor
+        morphs[nombre] = evaluar(m, beta, psi=psi, pose=pose_mandibula(cfg["mandibula"]))
+
+    destino = escribir_glb(base, m["f"], morphs, raiz / "assets" / "gabriela.glb")
+    tam = destino.stat().st_size / 1e6
+    print(f"{destino} ({tam:.1f} MB)")
+    print(f"  {len(base)} vértices, {len(m['f'])} caras, {len(morphs)} visemas")
+    for nombre, v in morphs.items():
+        d = np.linalg.norm(v - base, axis=1).max() * 1000
+        print(f"  {nombre:<4} desplazamiento máximo {d:5.1f} mm")

@@ -1,0 +1,73 @@
+{
+  "_comentario": [
+    "Cada visema es una pose de mandíbula (radianes) más coeficientes del espacio",
+    "de expresión de FLAME. Los componentes no son semánticos —son PCA— así que",
+    "se identificaron midiendo su efecto sobre los landmarks de la boca:",
+    "  psi[0]  ancho de boca:  +2 la estira 11,4 mm; negativo la redondea",
+    "  psi[3]  apertura de labios: +2 la abre 6,4 mm",
+    "Afínalos a ojo en /debug y vuelve a ejecutar export_glb.py.",
+    "Aperturas rebajadas tras verlas: 0.30 rad es un bostezo, el habla ronda 0.20."
+  ],
+  "visemas": {
+    "A": {
+      "mandibula": 0.2,
+      "psi": {
+        "0": 0.0,
+        "3": 1.0
+      }
+    },
+    "E": {
+      "mandibula": 0.11,
+      "psi": {
+        "0": 1.0,
+        "3": 0.5
+      }
+    },
+    "I": {
+      "mandibula": 0.05,
+      "psi": {
+        "0": 2.0,
+        "3": 0.0
+      }
+    },
+    "O": {
+      "mandibula": 0.13,
+      "psi": {
+        "0": -1.5,
+        "3": 0.8
+      }
+    },
+    "U": {
+      "mandibula": 0.05,
+      "psi": {
+        "0": -2.5,
+        "3": 0.3
+      }
+    },
+    "MBP": {
+      "mandibula": 0.0,
+      "psi": {
+        "0": 0.0,
+        "3": -1.0
+      }
+    },
+    "FV": {
+      "mandibula": 0.02,
+      "psi": {
+        "0": 0.5,
+        "3": -0.5
+      }
+    },
+    "C": {
+      "mandibula": 0.07,
+      "psi": {
+        "0": 0.0,
+        "3": 0.2
+      }
+    },
+    "X": {
+      "mandibula": 0.0,
+      "psi": {}
+    }
+  }
+}
