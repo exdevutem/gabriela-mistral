@@ -32,6 +32,7 @@ def escribir_glb(
     morphs: dict[str, np.ndarray],
     salida: Path,
     nombre: str = "gabriela",
+    colores: np.ndarray | None = None,
 ) -> Path:
     """`morphs` mapea nombre -> desplazamientos (mismos vértices, deltas absolutos)."""
     v = np.ascontiguousarray(vertices, dtype=np.float32)
@@ -58,6 +59,8 @@ def escribir_glb(
     a_pos = agregar(v, "VEC3", FLOAT, gl.ARRAY_BUFFER)
     a_nrm = agregar(n, "VEC3", FLOAT, gl.ARRAY_BUFFER)
     a_idx = agregar(f.reshape(-1), "SCALAR", UINT, gl.ELEMENT_ARRAY_BUFFER)
+    a_col = (agregar(np.ascontiguousarray(colores, dtype=np.float32), "VEC4",
+                     FLOAT, gl.ARRAY_BUFFER) if colores is not None else None)
 
     objetivos, nombres = [], []
     for nom, destino in morphs.items():
@@ -72,8 +75,10 @@ def escribir_glb(
             NORMAL=agregar(d_nrm, "VEC3", FLOAT, gl.ARRAY_BUFFER)))
         nombres.append(nom)
 
-    prim = gl.Primitive(attributes=gl.Attributes(POSITION=a_pos, NORMAL=a_nrm),
-                        indices=a_idx, mode=4, targets=objetivos)
+    atributos = gl.Attributes(POSITION=a_pos, NORMAL=a_nrm)
+    if a_col is not None:
+        atributos.COLOR_0 = a_col
+    prim = gl.Primitive(attributes=atributos, indices=a_idx, mode=4, targets=objetivos)
     malla = gl.Mesh(primitives=[prim], weights=[0.0] * len(objetivos), name=nombre)
     # three.js lee targetNames de extras para armar morphTargetDictionary.
     malla.extras = {"targetNames": nombres}
@@ -85,8 +90,10 @@ def escribir_glb(
         asset=gl.Asset(generator="gabriela-mistral"),
         materials=[gl.Material(
             pbrMetallicRoughness=gl.PbrMetallicRoughness(
-                baseColorFactor=[0.82, 0.79, 0.74, 1.0], metallicFactor=0.0,
-                roughnessFactor=0.85),
+                # con COLOR_0 el factor debe ser blanco: glTF los multiplica
+                baseColorFactor=([1.0, 1.0, 1.0, 1.0] if colores is not None
+                                 else [0.82, 0.79, 0.74, 1.0]),
+                metallicFactor=0.0, roughnessFactor=0.85),
             name="piedra")],
     )
     prim.material = 0
@@ -130,7 +137,27 @@ if __name__ == "__main__":
         morphs[nombre] = evaluar(m, beta, psi=psi,
                                  pose=pose_mandibula(cfg["mandibula"])) + desplazamiento
 
-    destino = escribir_glb(base, m["f"], morphs, raiz / "assets" / "gabriela.glb")
+    # El volumen del peinado sólo se lee como pelo si el material lo distingue:
+    # en piedra clara y sin textura, un casquete algo más grueso parece cráneo.
+    from hair_volume import _suavizar_campo, peso_cuero
+    caras_lmk = m["f"][m["lmk_faces_idx"].astype(int)]
+    lmk3d = np.einsum("ijk,ij->ik", base[caras_lmk], m["lmk_bary_coords"])
+    peso = peso_cuero(base, float(lmk3d[17:27, 1].mean()), float(base[:, 1].max()))
+    # El borde del peinado sigue la malla vértice a vértice y sale dentado como
+    # una sierra. Suavizarlo sobre la superficie lo convierte en un contorno.
+    peso = _suavizar_campo(peso[:, None], m["f"], pasos=6)[:, 0]
+    # En espacio LINEAL, que es como glTF interpreta COLOR_0: un 0,42 lineal se
+    # muestra como 0,68 en pantalla, y el contraste se pierde. Estos valores
+    # equivalen a ~0,87 y ~0,35 en sRGB.
+    PIEL = np.array([0.72, 0.68, 0.62])
+    PELO = np.array([0.10, 0.095, 0.10])
+    # transición más corta: un degradado largo lee como manchа, no como peinado
+    borde = np.clip((peso - 0.15) / 0.35, 0.0, 1.0)
+    rgb = PIEL + (PELO - PIEL) * (borde * borde * (3 - 2 * borde))[:, None]
+    colores = np.concatenate([rgb, np.ones((len(rgb), 1))], axis=1)
+
+    destino = escribir_glb(base, m["f"], morphs, raiz / "assets" / "gabriela.glb",
+                           colores=colores)
     tam = destino.stat().st_size / 1e6
     print(f"{destino} ({tam:.1f} MB)")
     print(f"  {len(base)} vértices, {len(m['f'])} caras, {len(morphs)} visemas")

@@ -127,7 +127,7 @@ def engrosar(v: np.ndarray, caras: np.ndarray, p2: np.ndarray, centro: np.ndarra
     return v + _suavizar_campo(campo, caras)
 
 
-def _suavizar_campo(campo: np.ndarray, caras: np.ndarray, pasos: int = 40) -> np.ndarray:
+def _suavizar_campo(campo: np.ndarray, caras: np.ndarray, pasos: int = 12) -> np.ndarray:
     """Promedia el desplazamiento con el de los vértices vecinos.
 
     Un campo derivado de un contorno angular cambia a saltos entre direcciones
