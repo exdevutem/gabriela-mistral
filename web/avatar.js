@@ -14,15 +14,17 @@ export async function crearAvatar(canvas) {
   const render = new THREE.WebGLRenderer({ canvas, antialias: true });
   render.setPixelRatio(Math.min(devicePixelRatio, 2));
 
-  // Tres luces: una principal cálida, un relleno frío y un contraluz que
-  // recorta la silueta. Sin el contraluz la cabeza se funde con el fondo.
-  const principal = new THREE.DirectionalLight(0xfff0dd, 2.6);
+  // Iluminación deliberadamente plana. La textura es una fotografía y ya trae
+  // sus sombras horneadas: sumarle un esquema de tres puntos las duplica y
+  // ennegrece medio rostro. Domina la ambiental, y las direccionales sólo
+  // insinúan el volumen y recortan la silueta contra el fondo.
+  const principal = new THREE.DirectionalLight(0xfff4e6, 0.85);
   principal.position.set(2, 3, 4);
-  const relleno = new THREE.DirectionalLight(0x93b4d8, 0.8);
+  const relleno = new THREE.DirectionalLight(0xbcd0e8, 0.35);
   relleno.position.set(-3, -0.5, 2);
-  const contra = new THREE.DirectionalLight(0xffd9a8, 1.4);
+  const contra = new THREE.DirectionalLight(0xffd9a8, 0.55);
   contra.position.set(-1.5, 1.5, -3);
-  escena.add(principal, relleno, contra, new THREE.AmbientLight(0x40382f, 1.2));
+  escena.add(principal, relleno, contra, new THREE.AmbientLight(0xfff2e2, 2.1));
 
   const gltf = await new GLTFLoader().loadAsync('/assets/gabriela.glb');
   const raiz = gltf.scene;
