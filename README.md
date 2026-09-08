@@ -45,9 +45,8 @@ uv run uvicorn gabriela.server:app --port 8000
 
 ## La cabeza
 
-Ahora mismo el repo trae una **cabeza provisional** (un esferoide con boca modelada
-por gaussianas) para poder probar toda la cadena. No se parece a nadie. La cabeza
-real se construye así:
+Se construye a partir de FLAME en cuatro pasos. El modelo no se versiona aquí: su
+licencia es de investigación y uso no comercial.
 
 ### 1. Descargar FLAME (paso manual, requiere registro)
 
@@ -83,9 +82,21 @@ cara que no es ninguna de las dos.
 
 ### 3. Exportar
 
-Cuando el ajuste convenza, `pipeline/export_glb.py` escribe el `.glb` con los
-visemas como morph targets, y se puede **borrar `pipeline/cabeza_provisional.py`
-entero**.
+```bash
+uv run python pipeline/flame.py                  # autocomprobación del skinning
+uv run python pipeline/export_glb.py             # -> assets/gabriela.glb
+```
+
+Los visemas se definen en `assets/visemes.json` como una apertura de mandíbula más
+coeficientes del espacio de expresión. Esos componentes son PCA, no tienen
+significado propio, así que se identificaron **midiendo** su efecto sobre los
+landmarks de la boca: `psi[0]` controla el ancho (±11 mm) y `psi[3]` la apertura de
+labios (+6 mm). Para afinarlos, muévelos en `/debug` y vuelve a exportar.
+
+La apertura de la mandíbula es una articulación real, no una expresión: exige
+skinning lineal sobre el esqueleto de cinco huesos de FLAME. `pipeline/flame.py` lo
+implementa en numpy y se autocomprueba: con pose cero ningún vértice se mueve, y al
+rotar la mandíbula baja la barbilla mientras el cráneo queda quieto.
 
 ## Verificación
 
@@ -99,6 +110,10 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 
 ## Notas de dependencias
 
+- **Ni PyTorch ni chumpy**: el .pkl de FLAME envuelve sus arrays en `chumpy`
+  (abandonada) y el landmark embedding guarda tensores de PyTorch. Ambos se leen
+  con stubs propios —`convert_flame.py` y `torch_pickle.py`— en vez de arrastrar
+  2,5 GB de dependencias para una conversión que se hace una sola vez.
 - **mediapipe fijado en 0.10.35**: la 1.x revienta en macOS ARM
   (`DrishtiMetalHelper / Service is unavailable`) porque fuerza Metal.
 - Las fotografías históricas vienen en escala de grises, y mediapipe exige tres
@@ -116,6 +131,10 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 
 ## Pendiente
 
-- Voz a voz con micrófono (`gemini-3.1-flash-live-preview`)
-- Parpadeo: necesita el morph target de párpados que traerá FLAME
-- Volumen de cabello: FLAME no trae pelo y su peinado recogido es reconocible
+- **Cabello**: FLAME no trae pelo, y el suyo, recogido, es media identificación.
+  Ahora mismo la cabeza sale calva.
+- **Ojos**: la malla trae globos oculares sin textura, que se leen como huecos.
+- **Parecido**: el ajuste monocular sólo observa 51 landmarks frontales, así que
+  recupera proporciones, no rasgos finos. Una segunda vista de perfil ayudaría,
+  pero no hay ninguna en dominio público con resolución suficiente.
+- Parpadeo, y voz a voz con micrófono (`gemini-3.1-flash-live-preview`).
