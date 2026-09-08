@@ -139,10 +139,16 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   peinado medida en la foto y se colorea aparte, lo que da volumen y un borde
   que sigue el nacimiento del pelo. Pero es un volumen liso: no hay raya, ondas
   ni mechones, y cubre las orejas más de lo que debería.
-- **Ojos**: la malla trae globos oculares sin textura, que se leen como huecos.
-- **Edad**: el modelo sale más joven que ella. FLAME no modela arrugas, surcos
-  ni párpados caídos, y las cejas —muy marcadas en su cara— no existen en la
-  malla. Eso pesa en el parecido tanto como la geometría.
+- **Ojos y cejas**: resueltos con color por vértice, sin geometría nueva. Los
+  globos oculares ya existen en la malla y sólo les faltaba iris y pupila; las
+  cejas son una banda sobre la piel siguiendo los landmarks 17-26.
+- **Edad**: el modelo sigue saliendo más joven que ella. FLAME no modela
+  arrugas, surcos nasogenianos ni párpados caídos, y eso pesa en el parecido
+  tanto como la geometría. Haría falta un mapa de relieve derivado de la foto.
+- **Resolución**: el color por vértice tiene el detalle de la malla, y FLAME
+  sólo pone 25 vértices a menos de 6 mm de una ceja. Por eso la ceja no puede
+  ser más fina de unos 7 mm. Cualquier detalle por debajo de eso necesita
+  textura y coordenadas UV.
 - **Parecido**: el ajuste monocular sólo observa 51 landmarks frontales, así que
   recupera proporciones, no rasgos finos. Una segunda vista de perfil ayudaría,
   pero no hay ninguna en dominio público con resolución suficiente.
