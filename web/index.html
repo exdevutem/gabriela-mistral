@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gabriela Mistral</title>
+<script type="importmap">
+{"imports": {
+  "three": "https://unpkg.com/three@0.185.1/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.185.1/examples/jsm/"
+}}
+</script>
+<style>
+  :root { --tinta: #e8e0d4; --fondo: #14100e; --tenue: #8b8175; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100dvh; display: flex; flex-direction: column;
+         background: var(--fondo); color: var(--tinta);
+         font: 16px/1.6 "Iowan Old Style", Georgia, serif; }
+  canvas { flex: 1; width: 100%; min-height: 0; display: block; }
+  #pie { padding: 1rem 1.25rem 1.5rem; display: flex; flex-direction: column;
+         gap: .75rem; max-width: 46rem; width: 100%; margin: 0 auto; }
+  #dicho { min-height: 3.2em; margin: 0; font-size: 1.15rem; }
+  #dicho.pensando { color: var(--tenue); font-style: italic; }
+  form { display: flex; gap: .5rem; }
+  input { flex: 1; padding: .7rem .9rem; border-radius: .4rem; font: inherit;
+          background: #1e1917; color: var(--tinta); border: 1px solid #352d28; }
+  input:focus { outline: 2px solid #7a6a55; outline-offset: 1px; }
+  button { padding: .7rem 1.3rem; border: 0; border-radius: .4rem; font: inherit;
+           background: #7a6a55; color: #14100e; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  #aviso { margin: 0; font-size: .78rem; color: var(--tenue); text-align: center; }
+</style>
+</head>
+<body>
+  <canvas id="lienzo" aria-label="Retrato animado de Gabriela Mistral"></canvas>
+  <div id="pie">
+    <p id="dicho" role="status" aria-live="polite"></p>
+    <form id="forma">
+      <input id="entrada" autocomplete="off" autofocus
+             placeholder="Pregúntale algo…" aria-label="Tu mensaje">
+      <button id="enviar" type="submit">Hablar</button>
+    </form>
+    <p id="aviso">Recreación con inteligencia artificial. No es una grabación
+      ni un testimonio real de Gabriela Mistral (1889–1957).</p>
+  </div>
+
+<script type="module">
+import { crearAvatar } from './static/avatar.js';
+
+const dicho = document.getElementById('dicho');
+const entrada = document.getElementById('entrada');
+const enviar = document.getElementById('enviar');
+const forma = document.getElementById('forma');
+
+const avatar = await crearAvatar(document.getElementById('lienzo'));
+
+const ws = new WebSocket(`ws://${location.host}/ws`);
+const ocupado = (si) => { enviar.disabled = si; entrada.disabled = si; if (!si) entrada.focus(); };
+ocupado(true);
+
+ws.onmessage = ({ data }) => {
+  const m = JSON.parse(data);
+  if (m.tipo === 'listo')    { dicho.textContent = ''; ocupado(false); }
+  if (m.tipo === 'pensando') { dicho.className = 'pensando'; dicho.textContent = 'pensando…'; }
+  if (m.tipo === 'texto')    { dicho.className = ''; dicho.textContent = m.texto; }
+  if (m.tipo === 'habla')    {
+    // Si el navegador bloquea la reproducción automática, la boca se movería en
+    // silencio y nadie sabría por qué. Mejor decirlo.
+    avatar.hablar(m.audio, m.visemas).catch(() => {
+      dicho.textContent = m.texto + '\n\n(El navegador bloqueó el audio: haz clic en la página y vuelve a preguntar.)';
+    });
+    ocupado(false);
+  }
+  if (m.tipo === 'error')    { dicho.className = 'pensando'; dicho.textContent = m.texto; ocupado(false); }
+};
+ws.onclose = () => { dicho.textContent = 'Se cortó la conexión con el servidor.'; ocupado(true); };
+
+forma.onsubmit = (e) => {
+  e.preventDefault();
+  const texto = entrada.value.trim();
+  if (!texto) return;
+  ws.send(texto);
+  entrada.value = '';
+  ocupado(true);
+};
+</script>
+</body>
+</html>

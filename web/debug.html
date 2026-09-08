@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Ajuste de visemas</title>
+<script type="importmap">
+{"imports": {
+  "three": "https://unpkg.com/three@0.185.1/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.185.1/examples/jsm/"
+}}
+</script>
+<style>
+  body { margin: 0; height: 100dvh; display: flex; background: #14100e; color: #e8e0d4;
+         font: 14px/1.5 ui-monospace, Menlo, monospace; }
+  canvas { flex: 1; min-width: 0; }
+  aside { width: 17rem; padding: 1rem; overflow-y: auto; background: #1b1614; }
+  label { display: block; margin-bottom: .85rem; }
+  input { width: 100%; }
+  b { color: #d8b98a; }
+</style>
+</head>
+<body>
+  <canvas id="lienzo"></canvas>
+  <aside id="panel"><p>Un slider por morph target. Sirve para afinar los visemas a ojo.</p></aside>
+<script type="module">
+import { crearAvatar } from './static/avatar.js';
+const avatar = await crearAvatar(document.getElementById('lienzo'));
+window.avatar = avatar;  // a mano en la consola: avatar.fijar('A', 1)
+const panel = document.getElementById('panel');
+for (const nombre of avatar.nombres) {
+  const l = document.createElement('label');
+  l.innerHTML = `<b>${nombre}</b> <span>0.00</span>
+                 <input type="range" min="0" max="1" step="0.01" value="0">`;
+  const [salida, deslizador] = [l.querySelector('span'), l.querySelector('input')];
+  deslizador.oninput = () => {
+    salida.textContent = (+deslizador.value).toFixed(2);
+    avatar.fijar(nombre, +deslizador.value);
+  };
+  panel.append(l);
+}
+</script>
+</body>
+</html>
