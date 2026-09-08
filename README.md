@@ -139,16 +139,17 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   peinado medida en la foto y se colorea aparte, lo que da volumen y un borde
   que sigue el nacimiento del pelo. Pero es un volumen liso: no hay raya, ondas
   ni mechones, y cubre las orejas más de lo que debería.
-- **Ojos y cejas**: resueltos con color por vértice, sin geometría nueva. Los
-  globos oculares ya existen en la malla y sólo les faltaba iris y pupila; las
-  cejas son una banda sobre la piel siguiendo los landmarks 17-26.
-- **Edad**: el modelo sigue saliendo más joven que ella. FLAME no modela
-  arrugas, surcos nasogenianos ni párpados caídos, y eso pesa en el parecido
-  tanto como la geometría. Haría falta un mapa de relieve derivado de la foto.
-- **Resolución**: el color por vértice tiene el detalle de la malla, y FLAME
-  sólo pone 25 vértices a menos de 6 mm de una ceja. Por eso la ceja no puede
-  ser más fina de unos 7 mm. Cualquier detalle por debajo de eso necesita
-  textura y coordenadas UV.
+- **De perfil no funciona.** La textura es proyectiva: sólo es válida para lo
+  que la cámara veía. Los vértices que miran hacia atrás muestrean la cara por
+  el otro lado, así que de frente se ve bien y girando el modelo no. Para el uso
+  previsto —una conversación cara a cara— alcanza, pero es el límite duro de
+  este enfoque.
+- **Una sola foto**: la textura hereda la iluminación del original, con sus
+  sombras horneadas. Por eso la escena se ilumina de forma plana: sumarle un
+  esquema de tres puntos duplicaba las sombras.
+- **Acabado escultórico**: `rasgos.py` sigue ahí y genera color por vértice con
+  cejas y ojos procedurales, para un busto sin fotografía. Ya no se usa por
+  defecto.
 - **Parecido**: el ajuste monocular sólo observa 51 landmarks frontales, así que
   recupera proporciones, no rasgos finos. Una segunda vista de perfil ayudaría,
   pero no hay ninguna en dominio público con resolución suficiente.
