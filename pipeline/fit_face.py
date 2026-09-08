@@ -29,6 +29,14 @@ BETAS = 80            # coeficientes de forma: más que esto sólo capta ruido d
 # deformarlo le sale gratis al optimizador: esa ganancia es sobreajuste, no
 # parecido. Con reg=30 se recupera la cara media y se pierde toda personalización.
 REGULARIZACION = 10.0
+# Peso de la restricción de silueta frente a los residuales de landmarks.
+PESO_SILUETA = 0.60
+MUESTRAS_CRANEO = 250
+# Espacio que se reserva bajo la silueta para el peinado. Sin él, el cráneo se
+# ajusta al contorno del PELO y se come el hueco que el pelo debía ocupar: una
+# vista frontal no distingue "cráneo grande" de "cráneo más cabello".
+MARGEN_PELO_MM = 15.0
+INTEROCULAR_MM = 63.0   # media adulta, para convertir el margen a píxeles
 
 
 def cargar_flame() -> dict:
@@ -65,6 +73,40 @@ def submalla_landmarks(m: dict) -> dict:
             "bary": m["lmk_bary_coords"]}
 
 
+def submalla_craneo(m: dict, n: int = MUESTRAS_CRANEO) -> dict:
+    """Muestra de vértices por encima de las cejas, para la restricción de silueta.
+
+    Los landmarks faciales no observan el cráneo, así que el ajuste lo deja del
+    tamaño de la cabeza media de FLAME —que resulta mayor que la suya— y la
+    malla acaba sobresaliendo de su propio peinado.
+    """
+    v0 = m["v_template"]
+    caras = m["f"][m["lmk_faces_idx"].astype(int)]
+    lmk = np.einsum("ijk,ij->ik", v0[caras], m["lmk_bary_coords"])
+    candidatos = np.flatnonzero(v0[:, 1] > lmk[17:27, 1].mean())
+    idx = candidatos[:: max(1, len(candidatos) // n)]
+    return {"v_template": v0[idx], "shapedirs": m["shapedirs"][idx]}
+
+
+def puntos_craneo(sub: dict, beta: np.ndarray) -> np.ndarray:
+    return sub["v_template"] + sub["shapedirs"][:, :, :len(beta)] @ beta
+
+
+def exceso_silueta(p2: np.ndarray, centro: np.ndarray, angulos: np.ndarray,
+                   radios: np.ndarray) -> np.ndarray:
+    """Cuánto se sale cada punto del contorno de la cabeza, en píxeles.
+
+    Unilateral a propósito: quedarse corto no penaliza, porque el peinado ocupa
+    un espacio que la malla desnuda no tiene por qué llenar. Sólo se castiga
+    sobresalir.
+    """
+    rel = p2 - centro
+    angulo = np.arctan2(rel[:, 0], -rel[:, 1])
+    radio = np.linalg.norm(rel, axis=1)
+    limite = np.interp(angulo, angulos, radios, left=radios[0], right=radios[-1])
+    return np.clip(radio - limite, 0, None)
+
+
 def landmarks_3d(sub: dict, beta: np.ndarray) -> np.ndarray:
     """Los 68 puntos, interpolados baricéntricamente sobre sus triángulos."""
     v = sub["v_template"] + sub["shapedirs"][:, :, :len(beta)] @ beta
@@ -83,16 +125,26 @@ def proyectar(p3: np.ndarray, params: np.ndarray) -> np.ndarray:
     return escala * p2 + desp
 
 
-def ajustar(m: dict, objetivo_2d: np.ndarray, indices=SIN_MANDIBULA):
-    """Optimiza forma y cámara para que los landmarks proyectados calcen con la foto."""
+def ajustar(m: dict, objetivo_2d: np.ndarray, indices=SIN_MANDIBULA,
+            silueta: tuple | None = None):
+    """Optimiza forma y cámara para que los landmarks proyectados calcen con la foto.
+
+    `silueta`, si se pasa, es (centro, ángulos, radios) del contorno de la cabeza
+    medido sobre la foto, y añade la restricción de que el cráneo quepa dentro.
+    """
     n = BETAS
     sub = submalla_landmarks(m)
+    craneo = submalla_craneo(m) if silueta else None
 
     def residuales(x: np.ndarray) -> np.ndarray:
         beta, camara = x[:n], x[n:]
         p2 = proyectar(landmarks_3d(sub, beta)[indices], camara)
-        return np.concatenate([(p2 - objetivo_2d[indices]).ravel(),
-                               REGULARIZACION * beta])
+        partes = [(p2 - objetivo_2d[indices]).ravel(), REGULARIZACION * beta]
+        if silueta:
+            centro, angulos, radios = silueta
+            pc = proyectar(puntos_craneo(craneo, beta), camara)
+            partes.append(PESO_SILUETA * exceso_silueta(pc, centro, angulos, radios))
+        return np.concatenate(partes)
 
     # arranque: cara media, mirando al frente, escalada al tamaño del rostro
     escala0 = np.ptp(objetivo_2d[:, 1]) / 0.25
@@ -107,15 +159,33 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("foto")
     p.add_argument("--preview", action="store_true", help="guarda comparación en /tmp")
+    p.add_argument("--sin-silueta", action="store_true",
+                   help="ajusta sólo con landmarks, sin restringir el cráneo")
     a = p.parse_args()
 
     m = cargar_flame()
     puntos, _ = detectar(Path(a.foto))
-    objetivo = a_dlib68(puntos)[:, :2]
+    p68 = a_dlib68(puntos)
+    objetivo = p68[:, :2]
 
-    beta, camara, r = ajustar(m, objetivo)
-    error = np.sqrt((r.fun[:-BETAS] ** 2).reshape(-1, 2).sum(axis=1)).mean()
+    silueta = None
+    if not a.sin_silueta:
+        from hair_volume import ANGULOS, _reparar, contorno_pelo
+        oi, od = p68[36:42, :2].mean(0), p68[42:48, :2].mean(0)
+        interocular = np.linalg.norm(od - oi)
+        centro = (oi + od) / 2 - np.array([0.0, 0.55 * interocular])
+        margen = MARGEN_PELO_MM * interocular / INTEROCULAR_MM
+        silueta = (centro, ANGULOS,
+                   _reparar(*contorno_pelo(Path(a.foto), centro, interocular)) - margen)
+
+    beta, camara, r = ajustar(m, objetivo, silueta=silueta)
+    n_lmk = len(SIN_MANDIBULA) * 2
+    error = np.sqrt((r.fun[:n_lmk] ** 2).reshape(-1, 2).sum(axis=1)).mean()
     print(f"convergió={r.success}  error medio={error:.2f} px  |β|={np.linalg.norm(beta):.2f}")
+    if silueta:
+        pc = proyectar(puntos_craneo(submalla_craneo(m), beta), camara)
+        exc = exceso_silueta(pc, *silueta)
+        print(f"cráneo fuera de la silueta: máximo {exc.max():.1f} px")
 
     salida = Path(__file__).parents[1] / "assets" / "flame" / "ajuste.npz"
     np.savez(salida, beta=beta, camara=camara)
