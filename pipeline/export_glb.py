@@ -33,6 +33,8 @@ def escribir_glb(
     salida: Path,
     nombre: str = "gabriela",
     colores: np.ndarray | None = None,
+    uv: np.ndarray | None = None,
+    imagen=None,
 ) -> Path:
     """`morphs` mapea nombre -> desplazamientos (mismos vértices, deltas absolutos)."""
     v = np.ascontiguousarray(vertices, dtype=np.float32)
@@ -61,6 +63,8 @@ def escribir_glb(
     a_idx = agregar(f.reshape(-1), "SCALAR", UINT, gl.ELEMENT_ARRAY_BUFFER)
     a_col = (agregar(np.ascontiguousarray(colores, dtype=np.float32), "VEC4",
                      FLOAT, gl.ARRAY_BUFFER) if colores is not None else None)
+    a_uv = (agregar(np.ascontiguousarray(uv, dtype=np.float32), "VEC2",
+                    FLOAT, gl.ARRAY_BUFFER) if uv is not None else None)
 
     objetivos, nombres = [], []
     for nom, destino in morphs.items():
@@ -78,21 +82,45 @@ def escribir_glb(
     atributos = gl.Attributes(POSITION=a_pos, NORMAL=a_nrm)
     if a_col is not None:
         atributos.COLOR_0 = a_col
+    if a_uv is not None:
+        atributos.TEXCOORD_0 = a_uv
     prim = gl.Primitive(attributes=atributos, indices=a_idx, mode=4, targets=objetivos)
     malla = gl.Mesh(primitives=[prim], weights=[0.0] * len(objetivos), name=nombre)
     # three.js lee targetNames de extras para armar morphTargetDictionary.
     malla.extras = {"targetNames": nombres}
+
+    # La imagen va dentro del propio .glb, en el mismo buffer binario: un GLB con
+    # textura externa deja de ser un archivo que se puede mover solo.
+    imagenes, muestreadores, texturas = [], [], []
+    if imagen is not None:
+        import io as _io
+        png = _io.BytesIO()
+        imagen.save(png, format="PNG", optimize=True)
+        crudo = png.getvalue()
+        blob += b"\x00" * (-len(blob) % 4)
+        vistas.append(gl.BufferView(buffer=0, byteOffset=len(blob), byteLength=len(crudo)))
+        blob += crudo
+        imagenes.append(gl.Image(bufferView=len(vistas) - 1, mimeType="image/png"))
+        # CLAMP en los bordes: con el recorte ajustado a la cabeza, lo que hay al
+        # borde es piel o pelo, así que repetir es mejor que mostrar el fondo.
+        muestreadores.append(gl.Sampler(magFilter=9729, minFilter=9987,
+                                        wrapS=33071, wrapT=33071))
+        texturas.append(gl.Texture(sampler=0, source=0))
 
     modelo = gl.GLTF2(
         scene=0, scenes=[gl.Scene(nodes=[0])], nodes=[gl.Node(mesh=0, name=nombre)],
         meshes=[malla], accessors=accesos, bufferViews=vistas,
         buffers=[gl.Buffer(byteLength=len(blob))],
         asset=gl.Asset(generator="gabriela-mistral"),
+        images=imagenes, samplers=muestreadores, textures=texturas,
         materials=[gl.Material(
             pbrMetallicRoughness=gl.PbrMetallicRoughness(
-                # con COLOR_0 el factor debe ser blanco: glTF los multiplica
-                baseColorFactor=([1.0, 1.0, 1.0, 1.0] if colores is not None
+                # glTF multiplica factor x COLOR_0 x textura: con cualquiera de
+                # los dos últimos presentes, el factor tiene que ser blanco.
+                baseColorFactor=([1.0, 1.0, 1.0, 1.0]
+                                 if (colores is not None or imagen is not None)
                                  else [0.82, 0.79, 0.74, 1.0]),
+                baseColorTexture=(gl.TextureInfo(index=0) if imagen is not None else None),
                 metallicFactor=0.0, roughnessFactor=0.85),
             name="piedra")],
     )
@@ -116,7 +144,9 @@ if __name__ == "__main__":
 
     raiz = Path(__file__).parents[1]
     m = cargar()
-    beta = np.load(raiz / "assets" / "flame" / "ajuste.npz")["beta"]
+    aj = np.load(raiz / "assets" / "flame" / "ajuste.npz")
+    beta = aj["beta"]
+    FOTO = raiz / "assets" / "fotos" / "mistral-1946-frontal.jpg"
 
     base = evaluar(m, beta)
     # El peinado sólo cambia la geometría de reposo: no se mueve al hablar, así
@@ -137,26 +167,16 @@ if __name__ == "__main__":
         morphs[nombre] = evaluar(m, beta, psi=psi,
                                  pose=pose_mandibula(cfg["mandibula"])) + desplazamiento
 
-    # El volumen del peinado sólo se lee como pelo si el material lo distingue:
-    # en piedra clara y sin textura, un casquete algo más grueso parece cráneo.
-    # Lo mismo vale para los ojos, que sin color son huecos, y para las cejas,
-    # que FLAME no modela en absoluto.
-    from hair_volume import peso_cuero
-    from rasgos import colores as colores_por_vertice
-    from rasgos import peso_cejas, relieve_cejas
-
-    peso_pelo = peso_cuero(m)          # ya viene suavizado sobre la superficie
-    peso_ceja = peso_cejas(m, base)
-
-    # El relieve de la ceja va también en los visemas: es geometría estática,
-    # como el peinado, y debe acompañar a la malla en todas sus poses.
-    ceja3d = relieve_cejas(base, peso_ceja, _normales(base, m["f"]))
-    base = base + ceja3d
-    for nombre in morphs:
-        morphs[nombre] = morphs[nombre] + ceja3d
+    # La textura sustituye al color por vértice de rasgos.py: la fotografía ya
+    # trae pelo, cejas e iris, y además arrugas, surcos y párpados, que ninguna
+    # cantidad de color por vértice podía dar con 5023 vértices.
+    # rasgos.py se conserva para un acabado escultórico sin fotografía.
+    from fit_face import proyectar
+    from textura import preparar
+    imagen, uv = preparar(base, aj["camara"], FOTO, proyectar)
 
     destino = escribir_glb(base, m["f"], morphs, raiz / "assets" / "gabriela.glb",
-                           colores=colores_por_vertice(m, base, peso_pelo, peso_ceja))
+                           uv=uv, imagen=imagen)
     tam = destino.stat().st_size / 1e6
     print(f"{destino} ({tam:.1f} MB)")
     print(f"  {len(base)} vértices, {len(m['f'])} caras, {len(morphs)} visemas")
