@@ -27,6 +27,7 @@ from torch_pickle import cargar_npy
 FLAME_DIR = Path(__file__).parents[1] / "assets" / "flame"
 SALIDA = FLAME_DIR / "flame.npz"
 EMBEDDING = FLAME_DIR / "landmark_embedding.npy"
+MASCARAS = FLAME_DIR / "FLAME_masks.pkl"
 DESCARGA = "https://flame.is.tue.mpg.de/  (requiere registro; licencia no comercial)"
 
 # shapedirs concatena los dos espacios: primero forma, después expresión.
@@ -66,7 +67,8 @@ def cargar_pkl(ruta: Path) -> dict:
 
 
 def buscar_pkl() -> Path:
-    candidatos = sorted(FLAME_DIR.glob("*.pkl"))
+    # El de máscaras también es un .pkl y ordena antes que flame2023.pkl
+    candidatos = sorted(p for p in FLAME_DIR.glob("*.pkl") if p != MASCARAS)
     if not candidatos:
         raise SystemExit(
             f"No hay ningún .pkl en {FLAME_DIR}.\n"
@@ -110,6 +112,14 @@ def convertir(ruta: Path) -> Path:
     salida["lmk_faces_idx"] = np.asarray(emb["full_lmk_faces_idx"]).reshape(-1)
     salida["lmk_bary_coords"] = np.asarray(
         emb["full_lmk_bary_coords"], dtype=np.float32).reshape(-1, 3)
+
+    # Regiones semánticas: qué vértices son cuero cabelludo, cara, cuello, orejas.
+    # Sin ellas hay que deducir el cuero cabelludo por altura, y eso produce un
+    # borde horizontal —un flequillo recto— en lugar del arco del nacimiento del
+    # pelo.
+    if MASCARAS.exists():
+        for nombre, indices in cargar_pkl(MASCARAS).items():
+            salida[f"mask_{nombre}"] = np.asarray(indices, dtype=np.int64)
 
     faltan = [k for k in ("v_template", "shapedirs", "f") if k not in salida]
     if faltan:
