@@ -1,0 +1,9 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+assets/flame/
+assets/gabriela.glb
+.DS_Store
+.playwright-mcp/
+assets/models/
