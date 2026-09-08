@@ -38,26 +38,42 @@ assert len(A_DLIB68) == 68, f"la tabla debe tener 68 puntos, tiene {len(A_DLIB68
 SIN_MANDIBULA = list(range(17, 68))
 
 
-def detectar(foto: Path) -> tuple[np.ndarray, np.ndarray]:
-    """Devuelve (478 puntos xyz en coordenadas de imagen, 52 blendshapes)."""
+# Por encima de este tamaño el detector pierde precisión y consume memoria de más.
+LADO_MAXIMO = 1600
+
+
+def detectar(foto: Path, lado_maximo: int = LADO_MAXIMO) -> tuple[np.ndarray, np.ndarray]:
+    """Devuelve (478 puntos xyz en coordenadas de la imagen ORIGINAL, 52 blendshapes)."""
     import mediapipe as mp
     from mediapipe.tasks.python import BaseOptions, vision
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None  # los escaneos de archivo superan el límite antibomba
 
     if not MODELO.exists():
         raise FileNotFoundError(
             f"Falta {MODELO}.\nDescárgalo con:\n  curl -sL -o {MODELO} {URL_MODELO}")
 
+    # Las fotografías históricas vienen en escala de grises, y mediapipe exige tres
+    # canales: pasarle un TIFF o PNG de un canal revienta el grafo con un error de
+    # dimensiones ([1,128,128,1] vs [1,128,128,3]) que no dice de dónde viene.
+    pil = Image.open(foto).convert("RGB")
+    ancho, alto = pil.size
+    escala = min(1.0, lado_maximo / max(ancho, alto))
+    if escala < 1.0:
+        pil = pil.resize((round(ancho * escala), round(alto * escala)), Image.LANCZOS)
+
     opciones = vision.FaceLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=str(MODELO)),
         output_face_blendshapes=True, num_faces=1)
     with vision.FaceLandmarker.create_from_options(opciones) as detector:
-        imagen = mp.Image.create_from_file(str(foto))
+        imagen = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(pil))
         r = detector.detect(imagen)
     if not r.face_landmarks:
         raise ValueError(f"No se detectó ninguna cara en {foto}")
-
-    alto, ancho = imagen.height, imagen.width
     # z viene en la misma escala que x, relativo al centro de la cabeza
+    # mediapipe entrega coordenadas normalizadas: se escalan al tamaño ORIGINAL,
+    # así el reescalado de arriba es invisible para quien llama.
     puntos = np.array([[p.x * ancho, p.y * alto, p.z * ancho]
                        for p in r.face_landmarks[0]], dtype=np.float64)
     pesos = np.array([b.score for b in r.face_blendshapes[0]], dtype=np.float64)

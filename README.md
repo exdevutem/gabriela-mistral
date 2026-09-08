@@ -94,6 +94,9 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 
 - **mediapipe fijado en 0.10.35**: la 1.x revienta en macOS ARM
   (`DrishtiMetalHelper / Service is unavailable`) porque fuerza Metal.
+- Las fotografías históricas vienen en escala de grises, y mediapipe exige tres
+  canales: `landmarks.py` convierte a RGB antes de detectar. Sin eso el grafo
+  aborta con un error de dimensiones que no dice de dónde viene.
 - El modelo de landmarks se descarga aparte:
   ```bash
   curl -sL -o assets/models/face_landmarker.task \
