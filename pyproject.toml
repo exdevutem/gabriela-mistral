@@ -12,7 +12,10 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "httpx",
-    "f5-tts",
+    "neutts",
+    # neucodec (vía neutts) arrastra torchtune, que en 0.18 no encuentra
+    # torchao.dtypes.nf4tensor y revienta al importar. Probadas: 0.14 y 0.16 sí.
+    "torchao>=0.14,<0.18",
     "huggingface-hub",
     "python-dotenv",
 ]
