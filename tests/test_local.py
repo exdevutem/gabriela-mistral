@@ -138,9 +138,69 @@ def test_el_troceo_no_pierde_ni_desborda():
     assert trozos("Ay.") == ["Ay."], "una frase corta no debe trocearse"
 
 
+def test_las_frases_de_muletilla_son_cortas():
+    # La muletilla se reproduce entera, así que estas frases ya no retrasan la
+    # respuesta. Siguen cortas por otra razón: la primera es la que decide
+    # cuándo deja de haber silencio, y el visor no puede empezar a hablar hasta
+    # tenerla completa. Con 70 bytes, empieza a los 2,7-4,9 s.
+    from gabriela.voice import MAX_BYTES_MULETILLA, trozos
+
+    from gabriela.config import FRECUENTES, MULETILLAS
+
+    for texto in MULETILLAS + [r for _, r in FRECUENTES]:
+        for frase in trozos(texto):
+            largo = len(frase.encode())
+            assert largo <= MAX_BYTES_MULETILLA, f"{largo} bytes: {frase!r}"
+
+
+def test_las_preguntas_frecuentes_no_se_repiten():
+    # Se indexan por su texto: dos iguales se pisarían, y el badge de la
+    # segunda respondería lo de la primera sin que nada fallara.
+    from gabriela.config import FRECUENTES
+
+    preguntas = [p for p, _ in FRECUENTES]
+    assert len(set(preguntas)) == len(preguntas), "hay preguntas repetidas"
+    assert len(preguntas) >= 10, f"sólo {len(preguntas)} frecuentes"
+    for p in preguntas:
+        assert p.endswith("?"), f"el badge no es una pregunta: {p!r}"
+        assert len(p) <= 40, f"badge demasiado largo para la fila: {p!r}"
+
+
+def test_una_frecuente_a_medias_no_se_ofrece():
+    # Un badge que lleva a media respuesta es peor que no ofrecerlo: mejor que
+    # esa pregunta caiga en el LLM, que al menos contesta entera.
+    import tempfile
+    import wave as W
+
+    import gabriela.voice as voz
+    from gabriela.config import FRECUENTES
+
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        original, voz.FRECUENTES_DIR = voz.FRECUENTES_DIR, d
+        voz.frecuentes.cache_clear()
+        try:
+            # La primera, completa; la segunda, a la que le falta un trozo.
+            for i in (0, 1):
+                trozos_i = voz.trozos(FRECUENTES[i][1])
+                if i == 1:
+                    trozos_i = trozos_i[:-1]
+                for j in range(len(trozos_i)):
+                    with W.open(str(d / f"{i}-{j}.wav"), "wb") as w:
+                        w.setnchannels(1); w.setsampwidth(2); w.setframerate(24_000)
+                        w.writeframes(b"\x00\x00" * 2400)
+            voz.frecuentes.cache_clear()
+            ofrecidas = voz.frecuentes()
+            assert FRECUENTES[0][0] in ofrecidas, "la completa debe ofrecerse"
+            assert FRECUENTES[1][0] not in ofrecidas, "la incompleta no"
+        finally:
+            voz.FRECUENTES_DIR = original
+            voz.frecuentes.cache_clear()
+
+
 def test_muletillas_se_leen_y_no_se_regraban():
     # Si grabar_muletillas() no respetara lo ya grabado, cada arranque del
-    # contenedor costaría cuatro síntesis de más.
+    # contenedor costaría una síntesis por frase de más.
     import tempfile
     import wave as W
 
@@ -153,15 +213,41 @@ def test_muletillas_se_leen_y_no_se_regraban():
         try:
             assert voz.muletillas() == [], "sin archivos no debe haber muletillas"
             # Se fabrican a mano para no invocar a NeuTTS en un test.
-            for i in range(len(voz.MULETILLAS)):
-                with W.open(str(d / f"{i}.wav"), "wb") as w:
-                    w.setnchannels(1); w.setsampwidth(2); w.setframerate(24_000)
-                    w.writeframes(b"\x00\x00" * 2400)
+            for i, texto in enumerate(voz.MULETILLAS):
+                for j in range(len(voz.trozos(texto))):
+                    with W.open(str(d / f"{i}-{j}.wav"), "wb") as w:
+                        w.setnchannels(1); w.setsampwidth(2); w.setframerate(24_000)
+                        w.writeframes(b"\x00\x00" * 2400)
             voz.muletillas.cache_clear()
             leidas = voz.muletillas()
             assert len(leidas) == len(voz.MULETILLAS), leidas
-            assert leidas[0][0] == voz.MULETILLAS[0], "la frase debe acompañar al audio"
+            primera = voz.trozos(voz.MULETILLAS[0])
+            assert [f for f, _ in leidas[0]] == primera, "cada trozo con su frase"
             assert voz.grabar_muletillas() == 0, "no debe regrabar lo que ya existe"
+        finally:
+            voz.MULETILLAS_DIR = original
+            voz.muletillas.cache_clear()
+
+
+def test_una_muletilla_a_medias_no_se_usa():
+    # Si se corta la grabación a mitad (un Ctrl-C, un contenedor que muere),
+    # la muletilla quedaría contando una historia que se interrumpe en seco.
+    import tempfile
+    import wave as W
+
+    import gabriela.voice as voz
+
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        original, voz.MULETILLAS_DIR = voz.MULETILLAS_DIR, d
+        voz.muletillas.cache_clear()
+        try:
+            # Sólo el primer trozo de la primera muletilla: incompleta.
+            with W.open(str(d / "0-0.wav"), "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(24_000)
+                w.writeframes(b"\x00\x00" * 2400)
+            voz.muletillas.cache_clear()
+            assert voz.muletillas() == [], "una muletilla a medias no debe usarse"
         finally:
             voz.MULETILLAS_DIR = original
             voz.muletillas.cache_clear()

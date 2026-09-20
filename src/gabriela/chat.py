@@ -26,6 +26,16 @@ class Conversacion:
         cabeceras = {"Authorization": f"Bearer {LLM_API_KEY}"} if LLM_API_KEY else {}
         self._http = httpx.Client(timeout=120, headers=cabeceras)
 
+    def anotar(self, pregunta: str, respuesta: str) -> None:
+        """Deja constancia de un intercambio que no pasó por el modelo.
+
+        Las preguntas frecuentes se responden con audio ya grabado. Si no se
+        anotaran, un «¿y eso por qué?» a continuación llegaría al modelo sin
+        saber de qué se habló.
+        """
+        self._mensajes.append({"role": "user", "content": pregunta})
+        self._mensajes.append({"role": "assistant", "content": respuesta})
+
     def responder(self, texto: str) -> str:
         self._mensajes.append({"role": "user", "content": texto})
         r = self._http.post(LLM_URL, json={

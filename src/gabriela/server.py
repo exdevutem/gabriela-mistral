@@ -14,18 +14,19 @@ from fastapi.staticfiles import StaticFiles
 from .chat import Conversacion
 from .config import ASSETS, WEB
 from .visemes import VISEMAS, timeline
-from .voice import (SAMPLE_RATE, a_wav, calentar, muletillas, sintetizar,
-                    trozos)
+from .voice import (SAMPLE_RATE, a_wav, calentar, frecuentes, muletillas,
+                    sintetizar, trozos)
 
 log = logging.getLogger("gabriela")
 
 
 @contextlib.asynccontextmanager
 async def ciclo(_app):
-    """Carga F5-TTS y lo hace hablar una vez antes de aceptar visitas.
+    """Carga NeuTTS y lo hace hablar una vez antes de aceptar visitas.
 
-    Son ~1,3 GB de pesos más la primera inferencia, que sola costaba 329 s. Todo
-    eso se paga aquí y no en la primera pregunta.
+    Son ~1,5 GB de pesos más la primera inferencia, y de paso graba lo que se
+    dice sin pasar por el LLM: las muletillas y las respuestas frecuentes. Todo
+    eso se paga aquí y no con el visitante delante.
     """
     try:
         log.info("calentando el modelo de voz…")
@@ -64,8 +65,13 @@ def depuracion() -> FileResponse:
     return FileResponse(WEB / "debug.html")
 
 
-def _habla(texto: str, pcm: bytes, *, fin: bool) -> dict:
-    """Un mensaje de voz: audio y boca para un trozo de frase."""
+def _habla(texto: str, pcm: bytes, *, fin: bool, relleno: bool = False) -> dict:
+    """Un mensaje de voz: audio y boca para un trozo de frase.
+
+    `relleno` marca los trozos de muletilla: el visor los reproduce enteros,
+    pero no los cuenta en el «2 de 4» de la barra de avance, que habla de la
+    respuesta.
+    """
     return {
         "tipo": "habla",
         "texto": texto,
@@ -73,6 +79,7 @@ def _habla(texto: str, pcm: bytes, *, fin: bool) -> dict:
         "visemas": [[round(t, 3), v, round(w, 3)]
                     for t, v, w in timeline(pcm, texto, SAMPLE_RATE)],
         "fin": fin,
+        "relleno": relleno,
     }
 
 
@@ -80,20 +87,40 @@ def _habla(texto: str, pcm: bytes, *, fin: bool) -> dict:
 async def conversar(ws: WebSocket) -> None:
     await ws.accept()
     charla = Conversacion()  # una conversación por conexión: el historial vive aquí
-    await ws.send_json({"tipo": "listo", "visemas": VISEMAS})
+    # Sólo se ofrecen las que están grabadas: un badge que lleva a una respuesta
+    # a medio grabar es peor que no ofrecerlo.
+    await ws.send_json({"tipo": "listo", "visemas": VISEMAS,
+                        "frecuentes": list(frecuentes())})
     try:
         while True:
             pregunta = (await ws.receive_text()).strip()
             if not pregunta:
                 continue
+            # Una frecuente se responde con lo ya grabado: al instante, sin
+            # muletilla y sin pasar por el LLM. Es lo que hace que un badge
+            # valga la pena —y que las fechas que oiga el visitante sean las
+            # verificadas, no las que el modelo recuerde.
+            if partes := frecuentes().get(pregunta):
+                dicho = " ".join(f for f, _ in partes)
+                charla.anotar(pregunta, dicho)
+                await ws.send_json({"tipo": "texto", "texto": dicho,
+                                    "partes": len(partes)})
+                for i, (frase, pcm) in enumerate(partes):
+                    await ws.send_json(
+                        _habla(frase, pcm, fin=i == len(partes) - 1))
+                continue
+
             await ws.send_json({"tipo": "pensando"})
             # Una muletilla ya grabada, de inmediato: la síntesis de verdad
-            # tarda medio minuto, y medio minuto de estatua muda se lee como que
-            # el programa se colgó.
+            # tarda sus segundos, y una estatua muda se lee como que el programa
+            # se colgó. Va entera —cuenta algo del museo y cortarla dejaría la
+            # información a medias—, troceada por frases para que empiece a
+            # sonar cuanto antes. La respuesta se sintetiza mientras tanto y
+            # espera su turno en la cola del visor.
             relleno = muletillas()
             if relleno:
-                frase, pcm = random.choice(relleno)
-                await ws.send_json(_habla(frase, pcm, fin=False))
+                for frase, pcm in random.choice(relleno):
+                    await ws.send_json(_habla(frase, pcm, fin=False, relleno=True))
             try:
                 # En hilo aparte: quema CPU y en el bucle de eventos congelaría
                 # al resto de conexiones.

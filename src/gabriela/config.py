@@ -40,12 +40,160 @@ REF_TEXTO = VOZ / "referencia.txt"
 
 # Lo que dice mientras piensa. Se sintetizan una vez y se guardan: son siempre
 # las mismas, y pagarlas en cada pregunta sería añadir espera a la espera.
+#
+# Cada una empieza con una frase que compra tiempo y sigue contando el museo.
+# El servidor las manda troceadas por frase y el visor descarta los trozos que
+# no alcanzaron a sonar, así que el largo no se paga: si la respuesta llega
+# pronto, se oye sólo el principio.
+#
+# Los números van con letras a propósito: el TTS lee "1941" como puede.
+#
+# TODO lo que se afirma aquí está verificado contra la historia oficial del
+# museo (museodelaeducacion.gob.cl) y contra «Lucila Gabriela: La voz de la
+# Maestra» (MEGM, 2008). Si agregas una, verifica igual: ella no debe decir
+# cosas falsas sobre un museo real, y menos hablando en primera persona.
 MULETILLAS_DIR = Path(os.getenv("MULETILLAS_DIR", VOZ / "muletillas"))
 MULETILLAS = [
-    "Déjame pensar.",
-    "Mmm. Espera un momento.",
-    "A ver cómo te lo digo.",
-    "Buena pregunta, esa.",
+    "Mientras busco las palabras, déjame contarte dónde estás. "
+    "Este edificio fue la Escuela Normal Número Uno. "
+    "Aquí rendí mis exámenes de habilitación, el año diez. "
+    "Nunca tuve título de normalista. "
+    "Me hice maestra leyendo y enseñando. "
+    "Casi cien años después, le pusieron mi nombre a esta casa.",
+
+    "Dame un momento, que no quiero contestarte cualquier cosa. "
+    "Te cuento algo mientras. "
+    "Este museo nació el año cuarenta y uno. "
+    "Entonces se llamaba Museo Pedagógico de Chile. "
+    "Se mudó a esta casa en el ochenta y uno. "
+    "Un terremoto la cerró el ochenta y cinco. "
+    "Estuvo veintiún años sin abrir.",
+
+    "Espera, que la respuesta se me está formando. "
+    "Mira a tu alrededor mientras tanto. "
+    "Los bancos, los mapas, las máquinas de escribir. "
+    "Proyectores de otro siglo. "
+    "La campana de la primera Escuela de Preceptores de Chile. "
+    "Y los instrumentos de castigo, que también son historia.",
+
+    "Déjame pensar un poco. "
+    "Esta casa fue escuela de niñas por casi noventa años. "
+    "Su primera directora chilena fue Brígida Walker. "
+    "La conocí cuando vine a rendir mis exámenes. "
+    "Piensa en cuántas niñas cruzaron esta puerta antes que tú.",
+]
+
+# Preguntas frecuentes: los badges que la página ofrece bajo la caja de texto.
+# La respuesta va grabada, no la escribe el LLM: suena al instante, siempre dice
+# lo mismo y no hay forma de que invente una fecha. Es lo que corresponde a un
+# museo real —un dato falso aquí se lo lleva el visitante a casa creyendo que se
+# lo dijo ella—, y es también la respuesta más rápida que el sistema puede dar.
+#
+# Todo lo que se afirma está verificado contra las dos fuentes que documenta
+# assets/voz/README.md. Si agregas una, verifica igual y deja la fuente anotada.
+# Lo que es opinión suya («eso es lo que no hay que hacerle a un niño») va en su
+# voz y se distingue de lo que es dato; los datos no se adornan.
+FRECUENTES_DIR = Path(os.getenv("FRECUENTES_DIR", VOZ / "frecuentes"))
+FRECUENTES = [
+    # --- El museo ---
+    ("¿Qué fue este edificio?",
+     "Esta casa fue la Escuela Normal de Niñas Número Uno. "
+     "Funcionó como escuela desde mil ochocientos ochenta y seis. "
+     "Dejó de serlo el año setenta y tres. "
+     "Después llegó el museo."),
+
+    ("¿Desde cuándo existe el museo?",
+     "El museo nació el año cuarenta y uno. "
+     "Entonces se llamaba Museo Pedagógico de Chile. "
+     "Se mudó a esta casa en el ochenta y uno. "
+     "Y tomó mi nombre el ocho de marzo del dos mil seis."),
+
+    ("¿Por qué lleva tu nombre?",
+     "Porque fue aquí donde me hice maestra en el papel. "
+     "El año diez rendí en esta casa mis exámenes de habilitación. "
+     "Yo no venía de la Escuela Normal. "
+     "Casi cien años después le pusieron mi nombre a este lugar."),
+
+    ("¿Qué se guarda aquí?",
+     "Bancos, mapas, pizarras. "
+     "Máquinas de escribir y proyectores de otro siglo. "
+     "La campana de la primera Escuela de Preceptores de Chile. "
+     "Y también los instrumentos de castigo. "
+     "Esos también son parte de esta historia."),
+
+    ("¿Por qué estuvo cerrado?",
+     "Por un terremoto. "
+     "El del año ochenta y cinco dañó este edificio. "
+     "El museo estuvo veintiún años sin abrir. "
+     "Volvió el ocho de marzo del dos mil seis."),
+
+    ("¿Quién fue Brígida Walker?",
+     "La primera directora chilena de la Escuela Normal de Niñas. "
+     "Por ella lleva su nombre esta casa. "
+     "La conocí cuando vine a rendir mis exámenes. "
+     "Fue cercana conmigo en esos días."),
+
+    ("¿Dónde estamos?",
+     "En el barrio Yungay, en Santiago. "
+     "Calle Compañía, número tres mil ciento cincuenta. "
+     "Es la esquina con Chacabuco. "
+     "Esta casa es monumento nacional desde el año ochenta y uno."),
+
+    # --- Ella ---
+    ("¿Cuál es tu nombre verdadero?",
+     "Lucila Godoy Alcayaga. "
+     "Gabriela Mistral es un nombre que me puse yo. "
+     "Con ese firmé lo que escribí. "
+     "Pero la que enseñaba se llamaba Lucila."),
+
+    ("¿Cuándo naciste?",
+     "El siete de abril de mil ochocientos ochenta y nueve. "
+     "En Vicuña, en el valle de Elqui. "
+     "Ese mismo año se fundó el Instituto Pedagógico. "
+     "Buen año para nacer, si una iba a ser maestra."),
+
+    ("¿Tenías título de maestra?",
+     "No. Nunca pasé por la Escuela Normal. "
+     "Rendí exámenes de habilitación el año diez, en esta casa. "
+     "Sin título sólo podía enseñar en escuelas de segunda categoría. "
+     "Así que enseñé donde nadie más quería ir."),
+
+    ("¿Dónde enseñaste?",
+     "Empecé en escuelas pequeñas y apartadas. "
+     "La Cantera, detrás de las dunas, fue una de ellas. "
+     "Después dirigí liceos de niñas en Punta Arenas y en Temuco. "
+     "Y el Liceo Número Seis de Santiago."),
+
+    ("¿Cómo era tu escuela en La Cantera?",
+     "Era una escuela de noche. "
+     "De día no venía nadie, porque todos trabajaban. "
+     "Niños, hombres y viejos. "
+     "Me llevaban camotes, melones y papas, como un diezmo. "
+     "A un viejo analfabeto al fin le enseñé a leer."),
+
+    ("¿Qué hiciste en México?",
+     "Me llamó José Vasconcelos, el año veintidós. "
+     "Era el ministro de educación de México. "
+     "Trabajé en su reforma educativa. "
+     "Ayudé a crear bibliotecas escolares. "
+     "Y preparé lecturas para mujeres."),
+
+    ("¿Ganaste el Premio Nobel?",
+     "Sí. El de Literatura, el año cuarenta y cinco. "
+     "Pero si me preguntas qué fui, te diré maestra. "
+     "Lo otro vino después."),
+
+    ("¿Qué te pasó de niña en la escuela?",
+     "Me acusaron de robarme unos útiles. "
+     "No era cierto. "
+     "Los otros niños me golpearon. "
+     "Lo volví a contar el año cincuenta y cuatro, ya vieja. "
+     "Eso es lo que no hay que hacerle a un niño."),
+
+    ("¿Cuándo moriste?",
+     "El diez de enero de mil novecientos cincuenta y siete. "
+     "En un hospital de Nueva York, lejos de Chile. "
+     "Un cáncer al páncreas."),
 ]
 
 # El mundo físico necesita perillas.

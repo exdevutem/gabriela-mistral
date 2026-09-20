@@ -26,13 +26,18 @@ from functools import lru_cache
 
 import numpy as np
 
-from .config import (DEVICE, MULETILLAS, MULETILLAS_DIR, NEUTTS_CODEC,
-                     NEUTTS_REPO, REF_AUDIO, REF_TEXTO, RMS_OBJETIVO, SEED,
-                     TEMPERATURA)
+from .config import (DEVICE, FRECUENTES, FRECUENTES_DIR, MULETILLAS,
+                     MULETILLAS_DIR, NEUTTS_CODEC, NEUTTS_REPO, REF_AUDIO,
+                     REF_TEXTO, RMS_OBJETIVO, SEED, TEMPERATURA)
 
 SAMPLE_RATE = 24_000  # NeuCodec entrega 24 kHz, igual que el vocoder de F5
 SAMPLE_WIDTH = 2
 MAX_BYTES = 135  # tope por trozo; ver trozos()
+# Tope para las frases de muletilla, más corto a propósito. Cuando llega la
+# respuesta, el visor descarta el relleno pendiente pero deja terminar el trozo
+# que está sonando: esa frase es el retraso máximo que el relleno puede costar.
+# Con 70 bytes son unos 5 s. Medido: la voz va a unos 13 caracteres por segundo.
+MAX_BYTES_MULETILLA = 70
 
 
 def _usar_espeak_del_sistema() -> None:
@@ -130,42 +135,87 @@ def calentar() -> None:
     las muletillas que falten, que sirven de calentamiento.
     """
     _codigos_referencia()
-    if not grabar_muletillas():
+    if not grabar_muletillas() + grabar_frecuentes():
         sintetizar("Ay.")  # nada que grabar: hay que calentar igual
 
 
-def grabar_muletillas() -> int:
-    """Sintetiza a disco las muletillas que no estén ya grabadas.
+def _grabar(directorio, textos: list[str]) -> int:
+    """Sintetiza a disco los trozos que falten. Devuelve cuántos grabó.
 
-    Devuelve cuántas grabó. Son cuatro frases fijas: generarlas en cada pregunta
-    sería añadir espera a la espera que vienen a tapar.
+    Un archivo por *frase*, no por texto, porque el servidor los manda
+    troceados: así empieza a sonar en cuanto está la primera en vez de esperar
+    a tener los veinte segundos enteros.
     """
-    MULETILLAS_DIR.mkdir(parents=True, exist_ok=True)
-    grabadas = 0
-    for i, frase in enumerate(MULETILLAS):
-        destino = MULETILLAS_DIR / f"{i}.wav"
-        if destino.exists():
-            continue
-        destino.write_bytes(a_wav(sintetizar(frase)))
-        grabadas += 1
-    if grabadas:
+    directorio.mkdir(parents=True, exist_ok=True)
+    grabados = 0
+    for i, texto in enumerate(textos):
+        for j, frase in enumerate(trozos(texto)):
+            destino = directorio / f"{i}-{j}.wav"
+            if destino.exists():
+                continue
+            destino.write_bytes(a_wav(sintetizar(frase)))
+            grabados += 1
+    return grabados
+
+
+def _leer(directorio, textos: list[str]) -> list[list[tuple[str, bytes]]]:
+    """Lo grabado, como lista de trozos (frase, PCM) por texto.
+
+    Sólo devuelve los completos: a uno al que le falte un trozo se le cortaría
+    la historia a la mitad. Los incompletos salen como lista vacía para que el
+    índice siga correspondiendo con `textos`.
+    """
+    out = []
+    for i, texto in enumerate(textos):
+        partes = []
+        for j, frase in enumerate(trozos(texto)):
+            ruta = directorio / f"{i}-{j}.wav"
+            if not ruta.exists():
+                partes = []
+                break
+            with wave.open(str(ruta)) as w:
+                partes.append((frase, w.readframes(w.getnframes())))
+        out.append(partes)
+    return out
+
+
+def grabar_muletillas() -> int:
+    """Graba las muletillas que falten. Son textos fijos: generarlos en cada
+    pregunta sería añadir espera a la espera que vienen a tapar.
+    """
+    grabados = _grabar(MULETILLAS_DIR, MULETILLAS)
+    if grabados:
         muletillas.cache_clear()
-    return grabadas
+    return grabados
+
+
+def grabar_frecuentes() -> int:
+    """Graba las respuestas a las preguntas frecuentes que falten.
+
+    Son 68 trozos la primera vez, unos cinco minutos. A cambio, un visitante
+    que toca un badge oye la respuesta al instante y sin pasar por el LLM.
+    """
+    grabados = _grabar(FRECUENTES_DIR, [r for _, r in FRECUENTES])
+    if grabados:
+        frecuentes.cache_clear()
+    return grabados
 
 
 @lru_cache(maxsize=1)
-def muletillas() -> list[tuple[str, bytes]]:
-    """Las muletillas grabadas, como (frase, PCM). Vacío si aún no hay ninguna.
-
-    Cacheado: se consultan en cada pregunta y son unos pocos cientos de kB.
+def muletillas() -> list[list[tuple[str, bytes]]]:
+    """Las muletillas grabadas y completas. Cacheado: se consultan en cada
+    pregunta y son unos cientos de kB.
     """
-    out = []
-    for i, frase in enumerate(MULETILLAS):
-        ruta = MULETILLAS_DIR / f"{i}.wav"
-        if ruta.exists():
-            with wave.open(str(ruta)) as w:
-                out.append((frase, w.readframes(w.getnframes())))
-    return out
+    return [partes for partes in _leer(MULETILLAS_DIR, MULETILLAS) if partes]
+
+
+@lru_cache(maxsize=1)
+def frecuentes() -> dict[str, list[tuple[str, bytes]]]:
+    """Las frecuentes grabadas, por su pregunta. Sólo las completas: una a
+    medio grabar se responde mejor con el LLM que a medias.
+    """
+    grabadas = _leer(FRECUENTES_DIR, [r for _, r in FRECUENTES])
+    return {p: partes for (p, _), partes in zip(FRECUENTES, grabadas) if partes}
 
 
 def trozos(texto: str) -> list[str]:
