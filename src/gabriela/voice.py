@@ -1,63 +1,88 @@
-"""Texto -> WAV con F5-TTS afinado en español, ejecutándose en local.
+"""Texto -> WAV con NeuTTS nano-spanish, ejecutándose en local.
 
-F5-TTS clona: no tiene voces prefabricadas. La voz sale del par
-`assets/voz/referencia.wav` + `referencia.txt` (unos 10 s de habla y su
-transcripción exacta). Cambiar esos dos archivos cambia la voz de Gabriela.
+NeuTTS clona, igual que el F5-TTS que había antes: no tiene voces prefabricadas.
+La voz sale del par `assets/voz/referencia.wav` + `referencia.txt` (unos 10 s de
+habla y su transcripción exacta). Cambiar esos dos archivos cambia la voz de
+Gabriela.
+
+Medido en un M2 de 8 GB, con la misma referencia y las mismas frases:
+
+| frase                   | audio  | F5-TTS | NeuTTS |
+|-------------------------|--------|--------|--------|
+| «Déjame pensar.»        |  1,2 s | 10,7 s |  4,4 s |
+| «Mmm. Espera un momento.»| 1,9 s | 13,7 s |  4,6 s |
+| una respuesta de 10 s   | 10,2 s | 30,0 s | 13,1 s |
+
+Sigue sin ser tiempo real: las muletillas hacen falta igual.
 """
 from __future__ import annotations
 
 import io
+import platform
 import wave
 from functools import lru_cache
 
 import numpy as np
 
-from .config import (DEVICE, F5_ARQ, F5_CKPT, F5_REPO, MULETILLAS,
-                     MULETILLAS_DIR, NFE_STEP, REF_AUDIO, REF_TEXTO, SEED,
-                     VELOCIDAD)
+from .config import (DEVICE, MULETILLAS, MULETILLAS_DIR, NEUTTS_CODEC,
+                     NEUTTS_REPO, REF_AUDIO, REF_TEXTO, RMS_OBJETIVO, SEED,
+                     TEMPERATURA)
 
-SAMPLE_RATE = 24_000  # el vocoder de F5-TTS entrega 24 kHz, igual que el TTS anterior
+SAMPLE_RATE = 24_000  # NeuCodec entrega 24 kHz, igual que el vocoder de F5
 SAMPLE_WIDTH = 2
+MAX_BYTES = 135  # tope por trozo; ver trozos()
 
 
-def _leer_wav_con_soundfile() -> None:
-    """torchaudio 2.11 lee siempre vía torchcodec, que sólo carga con FFmpeg 4-7
-    y revienta contra el 9 de Homebrew. soundfile trae su propia libsndfile y
-    abre el WAV de referencia sin depender de nada del sistema.
+def _usar_espeak_del_sistema() -> None:
+    """El espeak-ng que trae `neutts` viene roto en macOS: la dylib empaquetada
+    lleva compilada la ruta del directorio temporal donde se construyó, que ya
+    no existe, y muere con «Error processing file .../phontab». Ni
+    ESPEAK_DATA_PATH ni EspeakWrapper.set_data_path la corrigen.
 
-    ponytail: parche de un solo punto —f5-tts llama a `torchaudio.load` una vez,
-    sobre el audio de referencia—. Cuando torchcodec soporte el FFmpeg instalado,
+    Se cambia por la de Homebrew (`brew install espeak-ng`), que sí conoce sus
+    datos. Tiene que ser DESPUÉS de importar neutts, porque su import elige la
+    empaquetada.
+
+    ponytail: parche de un solo punto y sólo en macOS —en Linux la biblioteca
+    empaquetada carga bien—. Cuando publiquen una rueda con la ruta correcta,
     esta función se borra entera.
     """
-    import soundfile as sf
-    import torch
-    import torchaudio
+    if platform.system() != "Darwin":
+        return
+    import glob
 
-    def load(uri, *_, channels_first=True, **__):
-        datos, sr = sf.read(uri, dtype="float32", always_2d=True)
-        t = torch.from_numpy(datos)
-        return (t.T if channels_first else t), sr
+    from phonemizer.backend.espeak.wrapper import EspeakWrapper
 
-    torchaudio.load = load
+    for patron in ("/opt/homebrew/Cellar/espeak-ng/*/lib/libespeak-ng.*.dylib",
+                   "/usr/local/Cellar/espeak-ng/*/lib/libespeak-ng.*.dylib"):
+        if encontradas := glob.glob(patron):
+            EspeakWrapper.set_library(encontradas[0])
+            return
+    raise RuntimeError(
+        "falta espeak-ng del sistema: `brew install espeak-ng`. El que trae "
+        "neutts no funciona en macOS."
+    )
 
 
 @lru_cache(maxsize=1)
 def precargar():
-    """Carga perezosa: son ~1,3 GB de pesos y tarda en arrancar.
+    """Carga perezosa: son ~1,5 GB de pesos y tarda en arrancar (10,6 s medidos
+    con los modelos ya en caché; la primera vez hay que bajarlos).
 
     Cacheado además porque mantenerlo en memoria es la diferencia entre
     sintetizar en segundos o en minutos.
     """
-    _leer_wav_con_soundfile()
+    from neutts import NeuTTS
 
-    from f5_tts.api import F5TTS
-    from huggingface_hub import hf_hub_download
+    _usar_espeak_del_sistema()
 
-    return F5TTS(
-        model=F5_ARQ,
-        ckpt_file=hf_hub_download(F5_REPO, F5_CKPT),
-        vocab_file=hf_hub_download(F5_REPO, "vocab.txt"),
-        device=DEVICE,
+    return NeuTTS(
+        backbone_repo=NEUTTS_REPO,
+        codec_repo=NEUTTS_CODEC,
+        backbone_device=DEVICE,
+        codec_device=DEVICE,
+        language="es",
+        seed=SEED,
     )
 
 
@@ -72,17 +97,24 @@ def _referencia() -> tuple[str, str]:
     return str(REF_AUDIO), REF_TEXTO.read_text(encoding="utf-8").strip()
 
 
+@lru_cache(maxsize=1)
+def _codigos_referencia():
+    """La referencia, ya pasada por el codec. Son 11,8 s que se pagan una sola
+    vez: sin cachear se pagarían en cada frase.
+    """
+    audio, _ = _referencia()
+    return precargar().encode_reference(audio)
+
+
 def calentar() -> None:
     """Prepara todo lo que no debe pagarse con el visitante delante.
 
-    Cargar los pesos no basta: la primera inferencia real paga además la
-    preparación del audio de referencia y la puesta en marcha de los kernels de
-    torch. Medido, eran **329 s** de más en la primera respuesta. Aquí se pagan
-    una vez, y de paso se graban las muletillas que falten, que sirven de
-    calentamiento.
+    Cargar los pesos no basta: hay que codificar el audio de referencia y poner
+    en marcha los kernels de torch. Aquí se paga una vez, y de paso se graban
+    las muletillas que falten, que sirven de calentamiento.
     """
-    faltan = grabar_muletillas()
-    if not faltan:
+    _codigos_referencia()
+    if not grabar_muletillas():
         sintetizar("Ay.")  # nada que grabar: hay que calentar igual
 
 
@@ -121,35 +153,48 @@ def muletillas() -> list[tuple[str, bytes]]:
 
 
 def trozos(texto: str) -> list[str]:
-    """Parte el texto en pedazos que F5-TTS sintetiza de una pieza.
+    """Parte el texto en pedazos que se sintetizan de una pieza.
 
-    Se reutiliza su propio `chunk_text` para que los cortes coincidan con los
-    que haría internamente: así cada llamada a `sintetizar` es un solo bloque y
-    el servidor puede mandar la primera frase mientras genera las siguientes.
+    Corta en fin de frase, y a la fuerza si un trozo pasa de MAX_BYTES. F5-TTS
+    traía su `chunk_text` y este es su reemplazo; el tope de 135 bytes se hereda
+    de él porque el servidor manda cada trozo en cuanto está y trozos cortos
+    adelantan la primera frase.
 
-    ponytail: F5 calcula su límite según la duración de la referencia. 135 es su
-    valor por defecto y queda por debajo del que sale con una referencia de 7-10
-    s. Con una referencia más larga habría que bajarlo, y lo peor que pasa si no
-    se hace es que un trozo salga partido en dos: más lento, no roto.
+    ponytail: NeuTTS rinde *mejor* cuanto más largo el trozo (RTF 1,29 en una
+    frase de 10 s contra 1,79 en una de 2 s), así que este tope cuesta algo de
+    rendimiento total a cambio de latencia inicial. Si algún día la primera
+    frase deja de importar, subirlo es la optimización gratis.
     """
-    from f5_tts.infer.utils_infer import chunk_text
-
-    return chunk_text(texto, max_chars=135) or [texto]
+    partes: list[str] = []
+    actual: list[str] = []
+    largo = 0
+    for palabra in texto.split():
+        b = len(palabra.encode())
+        if actual and largo + 1 + b > MAX_BYTES:
+            partes.append(" ".join(actual))
+            actual, largo = [], 0
+        largo += (1 if actual else 0) + b
+        actual.append(palabra)
+        if palabra.endswith((".", "!", "?", "…", ".»", ".\"")):
+            partes.append(" ".join(actual))
+            actual, largo = [], 0
+    if actual:
+        partes.append(" ".join(actual))
+    return partes or [texto]
 
 
 def sintetizar(texto: str) -> bytes:
     """Devuelve PCM crudo (16-bit mono, 24 kHz)."""
-    ref_audio, ref_texto = _referencia()
-    wav, _, _ = precargar().infer(
-        ref_file=ref_audio,
-        ref_text=ref_texto,
-        gen_text=texto,
-        nfe_step=NFE_STEP,
-        speed=VELOCIDAD,
-        seed=SEED,
-        show_info=lambda *_: None,  # no ensuciar el log del servidor
+    _, ref_texto = _referencia()
+    wav = precargar().infer(
+        texto, _codigos_referencia(), ref_texto, temperature=TEMPERATURA
     )
-    return (np.asarray(wav, dtype=np.float32).clip(-1, 1) * 32767).astype("<i2").tobytes()
+    x = np.asarray(wav, dtype=np.float32)
+    # NeuTTS entrega más bajo que F5 y el nivel varía entre frases; sin esto la
+    # muletilla suena a la mitad de volumen que la respuesta que la sigue.
+    if rms := float(np.sqrt((x**2).mean())):
+        x = x * (RMS_OBJETIVO / rms)
+    return (x.clip(-1, 1) * 32767).astype("<i2").tobytes()
 
 
 def a_wav(pcm: bytes) -> bytes:

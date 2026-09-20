@@ -25,12 +25,18 @@ LLM_URL = os.getenv("LLM_URL", "https://api.groq.com/openai/v1/chat/completions"
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")  # vacío para un llama-server local
 
-# --- Voz: F5-TTS afinado en español (clonación a partir de un audio de referencia) ---
-F5_REPO = "jpgallegoar/F5-Spanish"
-F5_CKPT = "model_1200000.safetensors"
-F5_ARQ = "F5TTS_Base"  # arquitectura del checkpoint; el vocab.txt del repo la reetiqueta a español
+# --- Voz: NeuTTS nano-spanish (clonación a partir de un audio de referencia) ---
+# Reemplazó a F5-TTS el 20 de septiembre de 2026: misma voz de referencia, 2,8
+# veces más rápido en el mismo M2 (medido: RTF 4,08 -> 1,45).
+NEUTTS_REPO = os.getenv("NEUTTS_REPO", "neuphonic/neutts-nano-spanish")
+NEUTTS_CODEC = os.getenv("NEUTTS_CODEC", "neuphonic/neucodec")
 REF_AUDIO = VOZ / "referencia.wav"
 REF_TEXTO = VOZ / "referencia.txt"
+
+# Ambos repos son *gated*: hay que entrar con la cuenta de Hugging Face a
+#   huggingface.co/neuphonic/neutts-nano-spanish  y  .../neucodec
+# y aceptar los términos una vez, con HF_TOKEN en el entorno. Sin eso la
+# descarga responde 403 y el servidor arranca sin voz.
 
 # Lo que dice mientras piensa. Se sintetizan una vez y se guardan: son siempre
 # las mismas, y pagarlas en cada pregunta sería añadir espera a la espera.
@@ -42,16 +48,17 @@ MULETILLAS = [
     "Buena pregunta, esa.",
 ]
 
-# El mundo físico necesita perillas: en un M2 la síntesis es lo que marca la
-# latencia, y bajar nfe_step la acorta a cambio de algo de calidad.
-# CPU a propósito, también en Apple Silicon. En MPS la síntesis va 4 veces más
-# rápida (11,6 s frente a 44 s) pero el proceso *muere sin traza* en cuanto F5
-# parte el texto en más de un bloque, que es cualquier respuesta de dos frases.
-# ponytail: si algún día MPS deja de caerse, F5_DEVICE=mps y a correr.
-DEVICE = os.getenv("F5_DEVICE", "cpu")
-NFE_STEP = int(os.getenv("F5_NFE_STEP", "8"))
-VELOCIDAD = float(os.getenv("F5_VELOCIDAD", "0.9"))  # <1 = más pausada
-# Semilla fija: la voz sale igual en cada ejecución. Además, sin ella F5-TTS
-# sortea un entero enorme y lo escribe en PYTHONHASHSEED, que solo admite
-# valores de 32 bits, y el intérprete lo escupe en cada llamada.
-SEED = int(os.getenv("F5_SEED", "0"))
+# El mundo físico necesita perillas.
+# CPU a propósito, también en Apple Silicon: no se ha medido que MPS gane aquí,
+# y con F5 la caída era silenciosa.
+DEVICE = os.getenv("NEUTTS_DEVICE", "cpu")
+# NeuTTS no tiene perilla de velocidad como la tenía F5 (`speed=0.9`). El ritmo
+# sale del audio de referencia: si habla apurada, la referencia es lo que hay
+# que cambiar.
+TEMPERATURA = float(os.getenv("NEUTTS_TEMPERATURA", "1.0"))
+# Sale más bajo que F5 (RMS medido 0,044 frente a 0,099 en la misma frase).
+# Se normaliza al nivel que tenía la voz anterior para no tocar el volumen del
+# navegador ni el de la sala.
+RMS_OBJETIVO = float(os.getenv("NEUTTS_RMS", "0.09"))
+# Semilla fija: la voz sale igual en cada ejecución.
+SEED = int(os.getenv("NEUTTS_SEED", "0"))

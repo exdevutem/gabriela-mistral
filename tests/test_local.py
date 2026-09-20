@@ -1,6 +1,6 @@
 """Comprobaciones de las dos piezas locales. Sin framework: `python tests/test_local.py`.
 
-Ninguna carga F5-TTS ni necesita llama-server levantado: lo que se prueba es la
+Ninguna carga NeuTTS ni necesita llama-server levantado: lo que se prueba es la
 lógica que rodea a ambos —historial, saneado de la respuesta, conversión a PCM—,
 que es donde puede romperse en silencio.
 """
@@ -123,7 +123,7 @@ def test_wav_es_el_formato_que_espera_el_navegador():
 
 def test_el_troceo_no_pierde_ni_desborda():
     # Si trozos() devolviera [], el servidor no mandaría audio y ella se
-    # quedaría muda sin que nada fallara. Importa f5-tts, así que tarda.
+    # quedaría muda sin que nada fallara.
     from gabriela.voice import trozos
 
     texto = ("Le diría que la escuela no es una cárcel, sino una ventana. "
@@ -152,7 +152,7 @@ def test_muletillas_se_leen_y_no_se_regraban():
         voz.muletillas.cache_clear()
         try:
             assert voz.muletillas() == [], "sin archivos no debe haber muletillas"
-            # Se fabrican a mano para no invocar a F5-TTS en un test.
+            # Se fabrican a mano para no invocar a NeuTTS en un test.
             for i in range(len(voz.MULETILLAS)):
                 with W.open(str(d / f"{i}.wav"), "wb") as w:
                     w.setnchannels(1); w.setsampwidth(2); w.setframerate(24_000)
