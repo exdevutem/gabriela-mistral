@@ -114,6 +114,9 @@ forma.onsubmit = (e) => {
   e.preventDefault();
   const texto = entrada.value.trim();
   if (!texto) return;
+  // Aquí, dentro del gesto: es el único momento en que Safari concede el
+  // permiso de reproducir audio, y la voz no llega hasta medio minuto después.
+  avatar.desbloquear();
   ws.send(texto);
   entrada.value = '';
   ocupado(true);

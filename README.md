@@ -192,6 +192,12 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   solo carga con FFmpeg 4–7 y revienta contra el 9 de Homebrew. `voice.py`
   sustituye `torchaudio.load` por `soundfile`, que trae su propia libsndfile.
   El día que torchcodec soporte el FFmpeg instalado, ese parche se borra.
+- **Safari exige un gesto reciente para reproducir audio**, y la voz llega medio
+  minuto después del clic. El permiso va atado al elemento `<audio>`, no a la
+  página, así que el visor reutiliza **uno solo** para toda la sesión y lo
+  desbloquea con 1 ms de silencio al enviar la pregunta. Por eso `avatar.js`
+  tiene un `audio` único en vez de crear uno por frase: no es un detalle de
+  estilo, es lo que hace que suene en Safari.
 - **F5-TTS se cae en MPS con respuestas de más de un bloque.** El proceso muere
   sin traza en cuanto el texto da para dos trozos, que es cualquier respuesta de
   dos frases. Por eso `F5_DEVICE` es `cpu` por defecto incluso en Apple Silicon,

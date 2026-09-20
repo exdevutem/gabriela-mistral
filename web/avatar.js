@@ -61,9 +61,20 @@ export async function crearAvatar(canvas) {
   controles.maxDistance = distancia * 2.5;
 
   const objetivo = new Float32Array(malla.morphTargetInfluences.length);
-  let pista = null, audio = null, cursor = 0, manual = false;
+  let pista = null, cursor = 0, manual = false;
   const cola = [];      // frases pendientes; el servidor las manda de a una
   let encadenando = false;
+
+  // Un solo elemento de audio para toda la sesión, en vez de uno por frase.
+  // Safari solo deja sonar el audio que se arrancó dentro de un gesto del
+  // usuario, y la voz tarda medio minuto en llegar: para entonces el permiso
+  // del clic ya caducó. El permiso queda atado al *elemento*, así que
+  // desbloqueando este al enviar la pregunta, todas las frases lo heredan.
+  const audio = new Audio();
+  audio.addEventListener('ended', () => { siguiente(); });
+  // 1 ms de silencio: lo mínimo que se puede reproducir para ganar el permiso.
+  const SILENCIO = 'data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YRAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  let desbloqueado = false;
 
   function ajustar() {
     const { clientWidth: w, clientHeight: h } = canvas;
@@ -80,9 +91,7 @@ export async function crearAvatar(canvas) {
     const [audioBase64, visemas] = parte;
     pista = visemas;
     cursor = 0;
-    audio = new Audio('data:audio/wav;base64,' + audioBase64);
-    // Sin esto queda una pausa entre frases mientras el bucle nota el final.
-    audio.onended = siguiente;
+    audio.src = 'data:audio/wav;base64,' + audioBase64;
     return audio.play();
   }
 
@@ -135,6 +144,23 @@ export async function crearAvatar(canvas) {
       encadenando = true;
       return siguiente();
     },
+    /**
+     * Gana el permiso del navegador para reproducir audio, reproduciendo un
+     * silencio. Hay que llamarlo **desde un gesto del usuario** —el envío de la
+     * pregunta—, porque para cuando llega la voz ese permiso ya caducó.
+     */
+    desbloquear() {
+      if (desbloqueado || !audio.paused) return;  // si ya suena, el permiso está
+      audio.src = SILENCIO;
+      // AbortError es lo normal, no un fallo: la primera frase llega y cambia
+      // el src antes de que el silencio termine. El permiso ya se ganó, y darlo
+      // por perdido haría que el siguiente envío pisara el audio en curso.
+      audio.play().then(
+        () => { desbloqueado = true; },
+        (e) => { desbloqueado = e.name === 'AbortError'; },
+      );
+    },
+
     /** Para la página de ajuste: fija un morph target a mano. */
     fijar(nombre, peso) {
       manual = true;

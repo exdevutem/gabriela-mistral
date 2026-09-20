@@ -247,6 +247,19 @@ no hubo que añadir camino nuevo, solo encolar antes.
 Verificado en navegador: la muletilla suena a 1,5 s, el indicador aparece a los
 2 s, ninguna frase se solapa con otra.
 
+**El audio hay que desbloquearlo con el gesto del usuario.** Safari solo deja
+sonar el audio que se arrancó dentro de un gesto reciente, y aquí la voz llega
+25-31 s después del clic: para entonces el permiso caducó. Se reproducía la
+muletilla —que llega en 1,5 s, dentro de la ventana— y se bloqueaba todo lo
+demás, con la boca quieta. El permiso se ata al *elemento* `<audio>`, así que el
+visor usa uno solo para toda la sesión y lo estrena con 1 ms de silencio al
+enviar la pregunta; las frases posteriores heredan el permiso.
+
+Reproducido y verificado con el WebKit de Playwright, que es el motor de Safari.
+En Chromium nunca falló, y ahí estuvo la trampa: la primera verificación se hizo
+con `--autoplay-policy=no-user-gesture-required`, que desactiva justo la política
+que rompía el producto.
+
 **Calentar el modelo al arrancar no es una optimización, es un requisito.**
 Cargar los pesos no basta: la primera inferencia real paga además la preparación
 del audio de referencia y la puesta en marcha de los kernels de torch. Medido:
