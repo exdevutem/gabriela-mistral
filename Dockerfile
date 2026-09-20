@@ -5,9 +5,13 @@
 # levanta el llama-server que viene incluido y todo corre sin red. El segundo
 # modo cuesta 2,4 GB más de RAM.
 #
-# Los modelos NO se hornean aquí (~3,3 GB y licencias que no queremos
+# Los modelos NO se hornean aquí (~3,5 GB y licencias que no queremos
 # redistribuir): se descargan al primer arranque a /modelos, que debe ser un
 # volumen persistente. Sin él, cada reinicio vuelve a bajarlos.
+#
+# La voz (neuphonic/neutts-nano-spanish y neuphonic/neucodec) vive en repos
+# *gated*: hace falta HF_TOKEN en el entorno, de una cuenta que haya aceptado
+# los términos de ambos en la web. Sin eso el arranque no baja la voz.
 
 # ---- llama.cpp ----------------------------------------------------------
 # Se compila en lugar de copiar un binario publicado: así enlaza contra las
@@ -56,8 +60,7 @@ ENV PYTHONPATH=/app/src \
     LLAMA_CACHE=/modelos/llama \
     LLM_GGUF=Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M \
     LLM_CTX=2048 \
-    F5_DEVICE=cpu \
-    F5_NFE_STEP=16 \
+    NEUTTS_DEVICE=cpu \
     PYTHONUNBUFFERED=1
 VOLUME /modelos
 
