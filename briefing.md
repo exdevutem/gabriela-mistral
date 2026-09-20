@@ -194,12 +194,12 @@ total, sino cuándo empieza a sonar: de 70 s a 30 s.
 |---|---|---|---|
 | Sin trocear | 70 s | — | 85 s |
 | Por frases, `nfe_step=16` | 51 s | 49 s | 120 s |
-| Por frases + respuestas cortas, `nfe_step=16` (actual) | **47-54 s** | 31-34 s | **96-101 s** |
-| Lo mismo con `nfe_step=8` | 18-26 s | 9-17 s | 48 s |
+| Por frases + respuestas cortas, `nfe_step=16` | 47-54 s | 31-34 s | 96-101 s |
+| **Lo mismo con `nfe_step=8`** (actual) | **25-31 s** | ninguno | **35-42 s** |
 
-**`nfe_step` se queda en 16, aunque 8 cueste menos de la mitad.** La diferencia
-no es de calidad gradual. Generando la misma frase con la misma semilla y
-comparando contra `nfe=64`:
+**`nfe_step` está en 8, y la medición decía 16.** Vale la pena dejar escrito el
+desacuerdo. Generando la misma frase con la misma semilla y comparando contra
+`nfe=64`:
 
 | `nfe` | corr. envolvente | dif. timbre | coste |
 |---|---|---|---|
@@ -215,13 +215,17 @@ muestreador cae en trayectorias distintas según cómo se discretice, no porque
 "menos pasos" sea "peor" de forma proporcional. Con 8 pasos no sale la misma voz
 algo degradada: sale otra interpretación, con las sílabas en otros sitios.
 
-16 es entonces el valor más barato que da el mismo resultado que los altos, y ya
-ahorra la mitad frente al 32 por defecto de F5.
+Por esos números, 16 era la elección segura: el valor más barato que reproduce
+el resultado de los altos. **Pero al escuchar las muestras, la de 8 pasos suena
+bien**, y quita la mitad de la espera. Manda el oído.
 
-**El límite de esta medición:** compara consistencia con el modelo convergido, no
-cómo suena. Nadie ha escuchado las muestras todavía. Si `nfe=8` resulta
-aceptable de oído, bajarlo quita 30 segundos de espera y es la mejora más grande
-que queda sin tocar hardware.
+**La lección, para la próxima vez que haya que elegir un parámetro perceptual:**
+la métrica medía consistencia con el modelo convergido, no calidad. Que 8 pasos
+produzcan otra interpretación no implica que esa interpretación sea peor: la
+energía en altas frecuencias es prácticamente idéntica en 8, 16 y 32 (0,90 %,
+0,96 % y 1,00 %), así que no añade aspereza ni ruido; solo dice las cosas de otra
+manera. Lo que la medición sí sirvió para descartar fue 12 y 20, que divergen
+más que 8 sin ser más baratos.
 
 El silencio entre frases es irreducible mientras la síntesis tarde más que el
 audio que produce: la voz nunca alcanza a la reproducción. Con 8 pasos son 8 s,
@@ -267,12 +271,6 @@ lo que debería.
 ## Próximos pasos
 
 En orden de rendimiento por esfuerzo.
-
-**0. Escuchar `nfe=8` y confirmar o revocar.** El default está en 16 por medición
-objetiva (ver *Límites actuales*), pero esa medición no oye. Hay muestras de la
-misma frase con 8, 16 y 32 pasos. Si 8 resulta aceptable, cambiar `F5_NFE_STEP`
-quita 30 segundos de espera sin tocar una línea de código. Cuesta dos minutos y
-es lo que más mejora la demostración.
 
 **1. Voz a voz con micrófono.** Elimina el teclado y hace la interacción
 presencial: es el paso que más cambia la experiencia. Dos caminos, y conviene

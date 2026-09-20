@@ -127,20 +127,18 @@ misma pregunta:
 |---|---|---|---|
 | Como estaba al principio | 70 s | — | 85 s |
 | Por frases, `nfe_step=16` | 51 s | 49 s | 120 s |
-| Por frases + respuestas cortas, **`nfe_step=16`** (actual) | **47-54 s** | **31-34 s** | **96-101 s** |
-| Lo mismo con `nfe_step=8` | 18-26 s | 9-17 s | 48 s |
+| Por frases + respuestas cortas, `nfe_step=16` | 47-54 s | 31-34 s | 96-101 s |
+| **Lo mismo con `nfe_step=8`** (actual) | **25-31 s** | **ninguno** | **35-42 s** |
 
-`nfe_step` se dejó en 16 a propósito, aunque 8 valga menos de la mitad de
-espera. No es una diferencia de calidad gradual: medido contra `nfe=64` sobre la
-misma frase y la misma semilla, 16 reproduce la interpretación convergida
-(correlación de envolvente 0,974, timbre a 1,9 dB) mientras que 8 produce **otra
-interpretación**, con las sílabas en sitios distintos (correlación 0,22-0,51,
-timbre a 5,1 dB). La curva no es monótona: 12 y 20 también divergen, y 16, 32 y
-64 coinciden entre sí.
+Con 8 pasos y respuestas de dos frases, la respuesta suele caber en un solo
+bloque, así que además desaparece el silencio intermedio.
 
-Dicho eso, la comparación mide **consistencia, no cómo suena**. Si al escuchar
-las muestras `nfe=8` resulta aceptable, bajarlo es la mejora de latencia más
-grande que queda disponible sin tocar hardware.
+**`nfe_step` está en 8 por escucha, no por medición.** Comparando señales contra
+`nfe=64`, 8 se aparta mucho de la interpretación convergida (correlación de
+envolvente 0,22-0,51 frente a 0,974 de `nfe=16`) — pero esa métrica mide
+consistencia, no calidad percibida, y al escucharlas la de 8 pasos resultó
+buena. Si quieres más margen de calidad a costa de esperar el doble, sube
+`F5_NFE_STEP` a 16; evita 12 y 20, que divergen más que 8.
 
 Tres cambios acumulados: hablar por frases en vez de esperar la respuesta
 entera, ocho pasos de difusión en vez de dieciséis, y un tope de 90 tokens con

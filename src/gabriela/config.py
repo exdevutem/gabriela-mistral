@@ -49,7 +49,7 @@ MULETILLAS = [
 # parte el texto en más de un bloque, que es cualquier respuesta de dos frases.
 # ponytail: si algún día MPS deja de caerse, F5_DEVICE=mps y a correr.
 DEVICE = os.getenv("F5_DEVICE", "cpu")
-NFE_STEP = int(os.getenv("F5_NFE_STEP", "16"))
+NFE_STEP = int(os.getenv("F5_NFE_STEP", "8"))
 VELOCIDAD = float(os.getenv("F5_VELOCIDAD", "0.9"))  # <1 = más pausada
 # Semilla fija: la voz sale igual en cada ejecución. Además, sin ella F5-TTS
 # sortea un entero enorme y lo escribe en PYTHONHASHSEED, que solo admite

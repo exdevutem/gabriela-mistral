@@ -53,9 +53,11 @@ De ahí los valores actuales: referencia corta y `F5_NFE_STEP=16`.
 silencio. Las graba el servidor al arrancar, una sola vez, con esta misma voz de
 referencia.
 
-**Si cambias la referencia, borra esa carpeta**: si no, seguirá titubeando con
-la voz anterior y cambiando de timbre a mitad de respuesta. El texto de las
-frases está en `MULETILLAS`, en `config.py`.
+**Si cambias la referencia o `F5_NFE_STEP`, borra esa carpeta**: si no, seguirá
+titubeando con la voz anterior y cambiando de timbre a mitad de respuesta. Pasa
+igual con los pasos de difusión, porque cambian el timbre lo suficiente para
+notarse entre la muletilla y la frase que la sigue. El texto de las frases está
+en `MULETILLAS`, en `config.py`.
 
 ## Procedencia
 
