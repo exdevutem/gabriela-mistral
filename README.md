@@ -10,7 +10,7 @@ mueve la cara mientras lo hace. Backend en Python, render en el navegador.
 ## Cómo funciona
 
 ```
-tu mensaje ──> Groq o llama.cpp ──> F5-TTS español ──> PCM 24 kHz
+tu mensaje ──> Groq o llama.cpp ──> NeuTTS nano-spanish ──> PCM 24 kHz
                                         │
                         envolvente RMS ─┴─ visemas del texto
                                         │
@@ -46,17 +46,20 @@ cp .env.example .env    # y pega tu LLM_API_KEY
 
 ### La voz
 
-F5-TTS no tiene voces prefabricadas: **clona** la que le des. Deja en `assets/voz/`
+NeuTTS no tiene voces prefabricadas: **clona** la que le des. Deja en `assets/voz/`
 un `referencia.wav` de 7–10 s de habla limpia y un `referencia.txt` con su
 transcripción exacta.
 
-**Ojo con la duración**: F5-TTS recorta el audio a 12 s pero usa el texto entero
-que le pases, así que un `.wav` largo con su transcripción completa sale
-atropellado. Y el largo de la referencia se paga en cada síntesis. Cómo recortar
-y transcribir, en `assets/voz/README.md`.
+**Ojo con la duración**: NeuTTS pide entre 3 y 15 s, y el `.txt` tiene que
+transcribir exactamente lo que suena en el `.wav`. Cómo recortar, en
+`assets/voz/README.md`.
 
-El checkpoint ([`jpgallegoar/F5-Spanish`](https://huggingface.co/jpgallegoar/F5-Spanish),
-~1,3 GB, CC BY-NC 4.0) se descarga solo la primera vez a la caché de Hugging Face.
+El modelo ([`neuphonic/neutts-nano-spanish`](https://huggingface.co/neuphonic/neutts-nano-spanish)
+y su codec [`neucodec`](https://huggingface.co/neuphonic/neucodec), ~1,5 GB) se
+descarga solo la primera vez a la caché de Hugging Face. **Los dos son repos
+*gated***: hay que aceptar sus términos una vez en la web y tener `HF_TOKEN` en
+el entorno, o la descarga responde 403. Su licencia es la «NeuTTS Open License
+1.0» — léela antes de publicar el proyecto.
 
 ## Puesta en marcha
 
@@ -71,7 +74,7 @@ Para usar un modelo local en lugar de Groq, deja `LLM_API_KEY` vacía, descoment
 llama-server -hf Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M --port 8080 -c 4096
 ```
 
-Arranca cargando F5-TTS —~1,3 GB, unos segundos—, para no pagarlo en la primera
+Arranca cargando NeuTTS —~1,5 GB, unos segundos—, para no pagarlo en la primera
 pregunta con el usuario mirando un «pensando» eterno.
 
 - `http://localhost:8000` — la conversación
@@ -174,7 +177,7 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   curl -sL -o assets/models/face_landmarker.task \
     https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
   ```
-- **PyTorch sí llega, pero por la voz**: F5-TTS lo arrastra (~2,5 GB). El
+- **PyTorch sí llega, pero por la voz**: NeuTTS lo arrastra (~2,5 GB). El
   pipeline de la cabeza sigue sin tocarlo —lee FLAME con stubs propios—, así que
   quien solo construya el modelo no necesita instalarlo.
 - **Groq retira modelos cada pocos meses** (`llama-3.3-70b-versatile` murió en
@@ -182,30 +185,32 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   `curl -s https://api.groq.com/openai/v1/models -H "Authorization: Bearer $LLM_API_KEY"`
   y ajusta `LLM_MODEL`.
 - **Elegir el GGUF**, si vas por local: en un M2 de 8 GB un 3B en Q4 convive con
-  F5-TTS; un 7B no. Si el modelo razona (Qwen3 y parientes), `chat.py` le quita
+  NeuTTS; un 7B no. Si el modelo razona (Qwen3 y parientes), `chat.py` le quita
   el bloque `<think>` antes de mandarlo al TTS, que si no lo leería en voz alta.
 - **Perillas de la voz** (variables de entorno, ver `.env.example`):
-  `F5_NFE_STEP` baja la latencia a costa de calidad —16 va casi al doble de
-  rápido que 32—, `F5_VELOCIDAD` ajusta la cadencia y `F5_DEVICE` fuerza
-  `mps`/`cpu` si la autodetección se equivoca.
-- **FFmpeg no hace falta**: `torchaudio` 2.11 lee siempre vía `torchcodec`, que
-  solo carga con FFmpeg 4–7 y revienta contra el 9 de Homebrew. `voice.py`
-  sustituye `torchaudio.load` por `soundfile`, que trae su propia libsndfile.
-  El día que torchcodec soporte el FFmpeg instalado, ese parche se borra.
+  `NEUTTS_RMS` sube o baja el volumen de salida —NeuTTS entrega más bajo que el
+  F5 anterior y `voice.py` lo normaliza—, y `NEUTTS_DEVICE` fuerza `mps`/`cpu`.
+  Cadencia ya no tiene perilla: el ritmo sale del audio de referencia.
+- **En macOS hace falta `brew install espeak-ng`**: el espeak que empaqueta
+  `neutts` lleva compilada la ruta del directorio temporal donde se construyó y
+  muere con «Error processing file .../phontab». `voice.py` lo cambia por el de
+  Homebrew después de importar neutts; el día que publiquen una rueda con la
+  ruta correcta, ese parche se borra.
 - **Safari exige un gesto reciente para reproducir audio**, y la voz llega medio
   minuto después del clic. El permiso va atado al elemento `<audio>`, no a la
   página, así que el visor reutiliza **uno solo** para toda la sesión y lo
   desbloquea con 1 ms de silencio al enviar la pregunta. Por eso `avatar.js`
   tiene un `audio` único en vez de crear uno por frase: no es un detalle de
   estilo, es lo que hace que suene en Safari.
-- **F5-TTS se cae en MPS con respuestas de más de un bloque.** El proceso muere
-  sin traza en cuanto el texto da para dos trozos, que es cualquier respuesta de
-  dos frases. Por eso `F5_DEVICE` es `cpu` por defecto incluso en Apple Silicon,
-  aunque MPS vaya 4 veces más rápido en las frases sueltas que sí sobrevive.
-- Medido end-to-end en un M2 con la CPU: la síntesis tarda **5 veces el tiempo
-  del audio** que produce, así que todo lo que acorta la respuesta acorta la
-  espera. Con `F5_NFE_STEP=8` y respuestas de dos frases, la primera suena a los
-  18-26 s y termina a los 48; sin esos dos ajustes eran 70 y 85.
+- **`NEUTTS_DEVICE` es `cpu` por defecto, también en Apple Silicon.** Es
+  herencia de F5-TTS, que moría sin traza en MPS con respuestas de más de un
+  bloque; con NeuTTS **no se ha medido** si MPS gana ni si se cae. Perilla
+  pendiente de probar.
+- Medido en un M2 con la CPU (20 de septiembre de 2026): la síntesis tarda
+  **1,45 veces el tiempo del audio** que produce —con F5-TTS eran 4,08—, así que
+  todo lo que acorta la respuesta sigue acortando la espera. Una respuesta de
+  10 s tarda 13 s en salir; antes eran 30. Las cifras end-to-end de esta lista
+  se midieron con F5 y **están pendientes de re-medir**.
 - **`max_tokens` está en 90 a propósito.** No es por ahorrar tokens: cada frase
   de más es un bloque más que sintetizar. Va junto con la orden de brevedad en
   `persona.py`, porque ninguna de las dos basta sola: el modelo se pasa igual, y

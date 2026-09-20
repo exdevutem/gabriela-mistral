@@ -3,7 +3,7 @@
 Una imagen, dos modos según haya o no `LLM_API_KEY`:
 
 - **Con clave** (Groq por defecto): el texto lo escribe un proveedor externo y el
-  contenedor sólo carga F5-TTS. **~5 GB de RAM.** Es el modo recomendado.
+  contenedor sólo carga NeuTTS. **~5 GB de RAM.** Es el modo recomendado.
 - **Sin clave**: se levanta el `llama-server` incluido y todo corre sin red.
   **~8 GB de RAM.** La salida si el nodo se queda sin internet.
 
@@ -63,9 +63,13 @@ docker run --rm -p 8000:8000 \
   ghcr.io/exdevutem/gabriela-mistral:0.1.0
 ```
 
-El primer arranque descarga 1,3 GB de F5-Spanish (3,3 GB si además levanta el
-modelo local) y tarda varios minutos. Los siguientes, unos 20 s, **si `/modelos`
-es persistente**.
+El primer arranque descarga 1,5 GB de NeuTTS y su codec (3,5 GB si además
+levanta el modelo local) y tarda varios minutos. Los siguientes, unos 45 s, **si
+`/modelos` es persistente**.
+
+Los dos repos de la voz son *gated*: el contenedor necesita `-e HF_TOKEN=...` de
+una cuenta que haya aceptado sus términos en la web, o el arranque se queda sin
+voz.
 
 ## En Proxmox 9
 
@@ -86,8 +90,9 @@ Variables que conviene fijar en el contenedor:
 | `LLM_API_KEY` | vacío | Clave del proveedor. Vacía = modelo local. |
 | `LLM_MODEL` | `qwen/qwen3.8-27b` | Groq retira modelos cada pocos meses. |
 | `LLM_URL` | Groq | Otro proveedor compatible con OpenAI. |
-| `F5_NFE_STEP` | `16` | Pasos de difusión. Menos = más rápido y peor. |
-| `F5_DEVICE` | `cpu` | No lo cambies sin GPU (ver abajo). |
+| `NEUTTS_DEVICE` | `cpu` | No lo cambies sin GPU (ver abajo). |
+| `NEUTTS_RMS` | `0.09` | Volumen de salida. Súbelo si la sala es ruidosa. |
+| `HF_TOKEN` | vacío | **Obligatorio**: la voz vive en repos *gated*. |
 | `LLM_CTX` | `2048` | Contexto del LLM. Subirlo cuesta RAM. |
 | `LLM_THREADS` | todos los núcleos | Hilos de llama.cpp. |
 | `LLM_GGUF` | `Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M` | Otro modelo. |
@@ -95,22 +100,23 @@ Variables que conviene fijar en el contenedor:
 
 ## Cuánta RAM y CPU asignarle
 
-### RAM: **6 GB** con Groq, **8 GB** sin él
+### RAM: **4 GB** con Groq, **8 GB** sin él
 
-Medido, no estimado (huella física en un M2, que en Linux es equivalente):
+Medido, no estimado (huella física en un M2, que en Linux es equivalente).
+Re-medido el 20 de septiembre de 2026, al cambiar F5-TTS por NeuTTS:
 
 | Componente | En régimen | Pico |
 |---|---|---|
-| F5-TTS + vocos cargados | 2,75 GB | **4,21 GB** al cargar |
-| Python, FastAPI y el resto | ~0,3 GB | ~0,3 GB |
-| **Con `LLM_API_KEY`** | **~3,1 GB** | **~4,5 GB** |
+| NeuTTS + codec cargados, con Python y FastAPI | 2,10 GB | **2,73 GB** al sintetizar |
+| **Con `LLM_API_KEY`** | **~2,1 GB** | **~2,7 GB** |
 | `llama-server`, 3B Q4 con `ctx 2048` | ~2,4 GB | ~2,4 GB |
-| **Sin clave, todo local** | **~5,4 GB** | **~6,9 GB** |
+| **Sin clave, todo local** | **~4,5 GB** | **~5,1 GB** |
 
-El pico está en el arranque: F5-TTS lee el checkpoint entero antes de liberar lo
-que no necesita. **6 GB** dejan margen sobre ese pico de 4,5 GB en el modo
-recomendado; **8 GB** hacen falta si levantas el modelo local, que además mapea
-2 GB de GGUF desde disco.
+**Desapareció el pico de arranque.** F5-TTS leía el checkpoint entero antes de
+liberar lo que no necesitaba y llegaba a 4,21 GB; NeuTTS no pasa de 2,73 GB, y
+su máximo es sintetizando, no cargando. Por eso el modo recomendado baja de 6 GB
+a **4 GB**. **8 GB** siguen haciendo falta si levantas el modelo local, que
+además mapea 2 GB de GGUF desde disco.
 
 Con menos margen, el sistema mata el proceso de FastAPI a mitad de una síntesis:
 ya pasó en la máquina de desarrollo, con 8 GB compartidos con el escritorio.
@@ -118,8 +124,19 @@ ya pasó en la máquina de desarrollo, con 8 GB compartidos con el escritorio.
 ### CPU: **8 vCPU**, y aun así no será fluido
 
 La síntesis es lo que manda: el texto llega de Groq en menos de un segundo y
-luego F5-TTS tarda **5 veces el tiempo del audio que produce**. Se habla por
-frases, así que lo que cuenta es cuándo empieza a sonar la primera, no el total.
+luego NeuTTS tarda **1,45 veces el tiempo del audio que produce** (F5-TTS
+tardaba 4,08). Se habla por frases, así que lo que cuenta es cuándo empieza a
+sonar la primera, no el total.
+
+**Re-medido con NeuTTS** (20 de septiembre de 2026, misma pregunta, dos corridas
+contra el WebSocket): la muletilla suena en el acto, la **primera frase de
+verdad a los 5,6-9,9 s** y **termina a los 14,8-20,2 s**. Con F5-TTS eran
+25-31 s y 35-42 s.
+
+> **La tabla de abajo se midió con F5-TTS.** Se deja como registro de por qué
+> el diseño es el que es: hablar por frases y respuestas cortas siguen siendo
+> lo que sostiene la latencia.
+
 Medido end-to-end contra el WebSocket, en un M2 con todos los núcleos, sobre la
 misma pregunta:
 
@@ -133,12 +150,11 @@ misma pregunta:
 Con 8 pasos y respuestas de dos frases, la respuesta suele caber en un solo
 bloque, así que además desaparece el silencio intermedio.
 
-**`nfe_step` está en 8 por escucha, no por medición.** Comparando señales contra
-`nfe=64`, 8 se aparta mucho de la interpretación convergida (correlación de
-envolvente 0,22-0,51 frente a 0,974 de `nfe=16`) — pero esa métrica mide
-consistencia, no calidad percibida, y al escucharlas la de 8 pasos resultó
-buena. Si quieres más margen de calidad a costa de esperar el doble, sube
-`F5_NFE_STEP` a 16; evita 12 y 20, que divergen más que 8.
+**`nfe_step` era la perilla de calidad de F5-TTS y ya no existe.** NeuTTS no
+tiene pasos de difusión: genera en un paso autoregresivo y su calidad no se
+negocia contra latencia. Lo que sí se hereda es que trozos más largos rinden
+mejor (RTF 1,29 en una frase de 10 s contra 1,79 en una de 2 s), así que el tope
+de `MAX_BYTES` en `voice.py` cambia latencia inicial por rendimiento total.
 
 Tres cambios acumulados: hablar por frases en vez de esperar la respuesta
 entera, ocho pasos de difusión en vez de dieciséis, y un tope de 90 tokens con
@@ -183,5 +199,5 @@ Tres motivos, cualquiera de ellos bastaría:
 
 Por eso la imagen es CPU-only y `torch` viene del índice `+cpu`: así son ~500 MB
 en vez de los ~7 GB de las ruedas con CUDA. Si algún día hay una GPU de Turing o
-posterior con 6 GB o más, el cambio es el índice de torch, `F5_DEVICE=cuda` y
+posterior con 6 GB o más, el cambio es el índice de torch, `NEUTTS_DEVICE=cuda` y
 compilar llama.cpp con `-DGGML_CUDA=ON`.

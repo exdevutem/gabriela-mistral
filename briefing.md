@@ -185,10 +185,21 @@ proyecto**. El texto llega de Groq en menos de un segundo; la síntesis tarda
 cinco veces el tiempo del audio que produce. En los Xeon del cluster será peor
 que en las cifras de aquí abajo, todas medidas en un M2.
 
-**Se habla por frases.** El servidor trocea la respuesta con el propio
-`chunk_text` de F5 —así cada trozo coincide con lo que el modelo sintetizaría de
-una pieza— y manda cada frase en cuanto está lista. Lo que importa no es el
-total, sino cuándo empieza a sonar: de 70 s a 30 s.
+**Se habla por frases.** El servidor trocea la respuesta por fin de frase, con
+un tope de 135 bytes, y manda cada trozo en cuanto está listo. Lo que importa no
+es el total, sino cuándo empieza a sonar.
+
+**El 20 de septiembre de 2026 F5-TTS fue reemplazado por NeuTTS nano-spanish**:
+2,8 veces más rápido en banco (RTF 4,08 → 1,45) con la misma voz de referencia.
+Medido contra el WebSocket, en dos corridas sobre la misma pregunta, la muletilla
+suena en el acto, la **primera frase de verdad a los 5,6-9,9 s** y **termina a
+los 14,8-20,2 s**. Con F5-TTS eran 25-31 s y 35-42 s.
+
+> **La tabla y las cifras que siguen se midieron con F5-TTS**, y `nfe_step` ya
+> no existe como perilla. Se dejan como registro de por qué el diseño es el que
+> es: trocear por frases y acortar las respuestas siguen siendo lo que sostiene
+> la latencia.
+
 
 | | Primera palabra | Silencio entre frases | Termina |
 |---|---|---|---|
@@ -266,11 +277,12 @@ del audio de referencia y la puesta en marcha de los kernels de torch. Medido:
 **390 s** la primera respuesta frente a 51 las siguientes. El servidor le hace
 decir una palabra antes de aceptar visitas, y por eso tarda ~40 s en levantar.
 
-**MPS no se puede usar.** En Apple Silicon la síntesis va 4 veces más rápida
-(11,6 s frente a 44 s), pero el proceso muere sin traza en cuanto F5 parte el
-texto en más de un bloque —es decir, en cualquier respuesta de dos frases—. Se
-verificó que en CPU el mismo texto funciona. Por eso `F5_DEVICE` es `cpu` por
-defecto: un valor rápido que tumba el servidor no es un valor.
+**MPS no se puede usar.** Con F5-TTS, en Apple Silicon la síntesis iba 4 veces
+más rápida (11,6 s frente a 44 s), pero el proceso moría sin traza en cuanto el
+texto pasaba de un bloque —cualquier respuesta de dos frases—. Por eso
+`NEUTTS_DEVICE` es `cpu` por defecto: un valor rápido que tumba el servidor no
+es un valor. Con NeuTTS, que reemplazó a F5 el 20 de septiembre de 2026, **esto
+no se ha vuelto a medir**: puede que MPS ya sirva.
 
 **Una sola vista.** El ajuste monocular recupera proporciones, no profundidad. No hay
 ninguna foto de perfil suya en dominio público con resolución suficiente; la mejor

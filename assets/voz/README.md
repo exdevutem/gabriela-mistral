@@ -1,20 +1,20 @@
 # Voz de referencia
 
-F5-TTS no tiene voces prefabricadas: clona la que le des. Estos dos archivos
+NeuTTS no tiene voces prefabricadas: clona la que le des. Estos dos archivos
 deciden cómo suena Gabriela.
 
 - `referencia.wav` — habla limpia, sin música ni ruido de fondo.
 - `referencia.txt` — la transcripción **exacta** de ese audio.
 
-## La regla que hay que respetar: 12 segundos
+## La regla que hay que respetar: 3–15 segundos
 
-F5-TTS recorta internamente el audio de referencia a 12 s, **pero usa el texto
-entero que le pases**. Si el `.wav` dura 75 s y el `.txt` los transcribe todos,
-el modelo cree que 863 caracteres caben en 12 s y la voz sale atropellada.
+NeuTTS pide una referencia de entre 3 y 15 s, mono, sin ruido de fondo. Audio y
+texto tienen que corresponderse **exactamente**: el `.txt` es la transcripción
+de lo que suena en el `.wav`, ni una palabra más.
 
-Audio y texto tienen que corresponderse tras el recorte. Lo seguro es recortar
-uno mismo el `.wav` a 7–10 s, en un silencio entre frases, y transcribir sólo
-ese trozo.
+(F5-TTS, el modelo anterior, recortaba a 12 s por dentro pero leía el texto
+entero, y descuadrar ambos le salía como voz atropellada. NeuTTS no recorta,
+pero el par sigue teniendo que cuadrar.)
 
 El actual son los primeros 7,58 s de `referencia-completa.wav`, cortados donde
 termina «Soy Lucila Godoy Alcayaga». Para rehacerlo desde el original:
@@ -26,38 +26,38 @@ print(silence.detect_nonsilent(a, min_silence_len=300, silence_thresh=a.dBFS - 1
 a[:7580].set_channels(1).set_frame_rate(24000).export("assets/voz/referencia.wav", format="wav")
 ```
 
-Y para transcribir el recorte sin escribirlo a mano, con el Whisper que ya trae
-`f5-tts`:
-
-```python
-from f5_tts.infer.utils_infer import transcribe
-print(transcribe("assets/voz/referencia.wav", language="es"))
-```
+Para transcribir el recorte sin escribirlo a mano hace falta un Whisper; ya no
+viene con el paquete de voz (`f5-tts` lo traía, `neutts` no).
 
 ## Duración y latencia
 
-El largo de la referencia se paga en **cada** síntesis: F5-TTS genera la
-referencia y la frase juntas. Medido en un M2 de 8 GB, para 6,5 s de audio:
+La referencia se codifica **una sola vez** al arrancar (11,8 s medidos) y se
+cachea: a diferencia de F5-TTS, su largo ya no se paga en cada frase.
 
-| referencia | `nfe_step=32` | `nfe_step=16` |
-|------------|---------------|---------------|
-| 11,8 s     | 31,4 s        | 15,8 s        |
-| 7,6 s      | 23,2 s        | 11,6 s        |
+Medido en un M2 de 8 GB, con esta misma referencia de 7,58 s (20 de septiembre
+de 2026):
 
-De ahí los valores actuales: referencia corta y `F5_NFE_STEP=16`.
+| frase                     | audio  | F5-TTS `nfe=8` | NeuTTS |
+|---------------------------|--------|----------------|--------|
+| «Déjame pensar.»          |  1,2 s |         10,7 s |  4,4 s |
+| «Mmm. Espera un momento.» |  1,9 s |         13,7 s |  4,6 s |
+| una respuesta de 10 s     | 10,2 s |         30,0 s | 13,1 s |
+| **factor de tiempo real** |        |       **4,08** | **1,45** |
+
+Arranque completo (`calentar()`, con las cuatro muletillas): **43,4 s**.
+
+NeuTTS habla más pausado que F5 en frases cortas —la misma muletilla le dura el
+doble— y no tiene perilla de velocidad: el ritmo sale de la referencia.
 
 ## Muletillas
 
 `muletillas/` son las frases cortas que dice mientras piensa —«Déjame pensar.»,
-«Mmm. Espera un momento.»— para que la espera de medio minuto no empiece en
-silencio. Las graba el servidor al arrancar, una sola vez, con esta misma voz de
+«Mmm. Espera un momento.»— para que la espera no empiece en silencio. Las graba el servidor al arrancar, una sola vez, con esta misma voz de
 referencia.
 
-**Si cambias la referencia o `F5_NFE_STEP`, borra esa carpeta**: si no, seguirá
-titubeando con la voz anterior y cambiando de timbre a mitad de respuesta. Pasa
-igual con los pasos de difusión, porque cambian el timbre lo suficiente para
-notarse entre la muletilla y la frase que la sigue. El texto de las frases está
-en `MULETILLAS`, en `config.py`.
+**Si cambias la referencia o el modelo, borra esa carpeta**: si no, seguirá
+titubeando con la voz anterior y cambiando de timbre a mitad de respuesta. El
+texto de las frases está en `MULETILLAS`, en `config.py`.
 
 ## Procedencia
 
