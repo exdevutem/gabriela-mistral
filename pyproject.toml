@@ -11,7 +11,9 @@ dependencies = [
     "pygltflib",
     "fastapi",
     "uvicorn[standard]",
-    "google-genai",
+    "httpx",
+    "f5-tts",
+    "huggingface-hub",
     "python-dotenv",
 ]
 
