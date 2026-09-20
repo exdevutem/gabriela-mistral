@@ -21,6 +21,7 @@
          gap: .75rem; max-width: 46rem; width: 100%; margin: 0 auto; }
   #dicho { min-height: 3.2em; margin: 0; font-size: 1.15rem; }
   #dicho.pensando { color: var(--tenue); font-style: italic; }
+  #dicho.error { color: #f0b7a4; }
   form { display: flex; gap: .5rem; }
   input { flex: 1; padding: .7rem .9rem; border-radius: .4rem; font: inherit;
           background: #1e1917; color: var(--tinta); border: 1px solid #352d28; }
@@ -29,6 +30,18 @@
            background: #7a6a55; color: #14100e; cursor: pointer; }
   button:disabled { opacity: .45; cursor: default; }
   #aviso { margin: 0; font-size: .78rem; color: var(--tenue); text-align: center; }
+  /* Preguntas frecuentes: una sola fila que se arrastra. En vertical ocuparían
+     cuatro filas y le comerían la cara, que es lo que la gente vino a ver. */
+  #badges { display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .15rem;
+            scrollbar-width: thin; scrollbar-color: #352d28 transparent;
+            /* Difumina los bordes para que se vea que la fila sigue. */
+            mask-image: linear-gradient(90deg, transparent, #000 1.2rem,
+                        #000 calc(100% - 1.2rem), transparent); }
+  #badges button { flex: 0 0 auto; padding: .35rem .8rem; border-radius: 1rem;
+                   font-size: .82rem; background: transparent; color: var(--tenue);
+                   border: 1px solid #352d28; cursor: pointer; }
+  #badges button:hover:not(:disabled) { color: var(--tinta); border-color: #7a6a55; }
+  #badges button:focus-visible { outline: 2px solid #7a6a55; outline-offset: 1px; }
   /* Late mientras se genera la voz: medio minuto de página quieta se lee como
      que el programa murió, justo cuando más está trabajando. */
   #progreso { margin: 0; min-height: 1.4em; font-size: .85rem; color: var(--tenue);
@@ -47,6 +60,7 @@
   <div id="pie">
     <p id="dicho" role="status" aria-live="polite"></p>
     <p id="progreso" role="status" aria-live="polite"></p>
+    <div id="badges" role="group" aria-label="Preguntas frecuentes"></div>
     <form id="forma">
       <input id="entrada" autocomplete="off" autofocus
              placeholder="Pregúntale algo…" aria-label="Tu mensaje">
@@ -64,11 +78,48 @@ const entrada = document.getElementById('entrada');
 const enviar = document.getElementById('enviar');
 const progreso = document.getElementById('progreso');
 const forma = document.getElementById('forma');
+const badges = document.getElementById('badges');
 
-const avatar = await crearAvatar(document.getElementById('lienzo'));
+// Sin try, un GLB que falta o viene corrupto aborta el módulo entero: no se
+// crea el WebSocket, no se registra ningún handler y el kiosco queda negro y
+// mudo, sin nada que permita diagnosticarlo desde la sala. Con él, se pierde
+// la cara pero la voz sigue sirviendo.
+let avatar = null, avisoRetrato = '';
+try {
+  avatar = await crearAvatar(document.getElementById('lienzo'));
+} catch (e) {
+  // Se guarda además de mostrarse: el 'listo' del WebSocket llega unos
+  // milisegundos después y limpia #dicho, que se comparte con la conversación.
+  // Sin esto, el fallo del retrato se borraría solo y quedaría un lienzo negro
+  // sin explicación, que es justo lo que este catch viene a evitar.
+  avisoRetrato = 'No se pudo cargar el retrato. Avisa al personal del museo.';
+  dicho.className = 'error';
+  dicho.textContent = avisoRetrato;
+  console.error(e);
+}
 
-const ws = new WebSocket(`ws://${location.host}/ws`);
-const ocupado = (si) => { enviar.disabled = si; entrada.disabled = si; if (!si) entrada.focus(); };
+// Un corte de red dejaba la pantalla muerta hasta que alguien fuera a
+// reiniciarla. En un kiosco desatendido eso son horas de busto mudo, así que
+// reconecta sola, espaciando los intentos para no martillear al servidor
+// mientras arranca.
+let ws, reintentos = 0;
+function conectar() {
+  const esquema = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${esquema}://${location.host}/ws`);
+  ws.onmessage = alMensaje;
+  ws.onopen = () => { reintentos = 0; };
+  ws.onclose = () => {
+    dicho.className = 'error';
+    dicho.textContent = 'Se cortó la conexión con el servidor. Reconectando…';
+    esperadas = 0; avance(); ocupado(true);
+    setTimeout(conectar, Math.min(1000 * 2 ** reintentos++, 15000));
+  };
+}
+const ocupado = (si) => {
+  enviar.disabled = si; entrada.disabled = si;
+  for (const b of badges.children) b.disabled = si;
+  if (!si) entrada.focus();
+};
 ocupado(true);
 
 // La voz tarda medio minuto en generarse. Sin decir en qué va, la página
@@ -81,9 +132,25 @@ function avance() {
     : 'preparando la voz…';
 }
 
-ws.onmessage = ({ data }) => {
+function alMensaje({ data }) {
   const m = JSON.parse(data);
-  if (m.tipo === 'listo')    { dicho.textContent = ''; ocupado(false); }
+  if (m.tipo === 'listo')    {
+    dicho.className = avisoRetrato ? 'error' : '';
+    dicho.textContent = avisoRetrato;
+    // Se reconecta sola, y el servidor manda 'listo' en cada conexión: sin
+    // vaciar, cada corte de red dejaría otra copia entera de la fila.
+    badges.replaceChildren();
+    // Sólo llegan las que tienen la respuesta ya grabada, así que un badge
+    // siempre responde al instante.
+    for (const pregunta of m.frecuentes || []) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = pregunta;
+      b.onclick = () => preguntar(pregunta);
+      badges.append(b);
+    }
+    ocupado(false);
+  }
   if (m.tipo === 'pensando') { esperadas = 0; llegadas = 0; }
   if (m.tipo === 'pensando') { dicho.className = 'pensando'; dicho.textContent = 'pensando…'; }
   if (m.tipo === 'texto')    {
@@ -96,10 +163,10 @@ ws.onmessage = ({ data }) => {
     // entrada no se libera hasta la última: mientras habla, no toca interrumpir.
     // Si el navegador bloquea la reproducción automática, la boca se movería en
     // silencio y nadie sabría por qué. Mejor decirlo.
-    avatar.hablar(m.audio, m.visemas).catch(() => {
+    (avatar?.hablar(m.audio, m.visemas, m.relleno) ?? Promise.resolve()).catch(() => {
       dicho.textContent += '\n\n(El navegador bloqueó el audio: haz clic en la página y vuelve a preguntar.)';
     });
-    llegadas++; avance();
+    if (!m.relleno) { llegadas++; avance(); }
     if (m.fin) ocupado(false);
   }
   if (m.tipo === 'error')    {
@@ -107,19 +174,24 @@ ws.onmessage = ({ data }) => {
     esperadas = 0; avance(); ocupado(false);
   }
 };
-ws.onclose = () => { dicho.textContent = 'Se cortó la conexión con el servidor.';
-                     esperadas = 0; avance(); ocupado(true); };
+conectar();
+
+/**
+ * Manda una pregunta. Tiene que llamarse DENTRO del gesto del usuario —el
+ * submit o el clic en un badge—: es el único momento en que Safari concede el
+ * permiso de reproducir audio, y la voz no llega hasta segundos después.
+ */
+function preguntar(texto) {
+  avatar?.desbloquear();
+  ws.send(texto);
+  entrada.value = '';
+  ocupado(true);
+}
 
 forma.onsubmit = (e) => {
   e.preventDefault();
   const texto = entrada.value.trim();
-  if (!texto) return;
-  // Aquí, dentro del gesto: es el único momento en que Safari concede el
-  // permiso de reproducir audio, y la voz no llega hasta medio minuto después.
-  avatar.desbloquear();
-  ws.send(texto);
-  entrada.value = '';
-  ocupado(true);
+  if (texto) preguntar(texto);
 };
 </script>
 </body>

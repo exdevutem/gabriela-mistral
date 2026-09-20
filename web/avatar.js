@@ -137,9 +137,14 @@ export async function crearAvatar(canvas) {
      * que ella empieza a hablar con la primera mientras llegan las demás; si se
      * reprodujera cada una al recibirla, se pisarían.
      */
-    hablar(audioBase64, visemas) {
+    hablar(audioBase64, visemas, relleno = false) {
       manual = false;
-      cola.push([audioBase64, visemas]);
+      // La muletilla se reproduce ENTERA, aunque la respuesta ya esté lista.
+      // Cuenta algo del museo —«déjame contarte dónde estás»— y cortarla a
+      // mitad dejaría la promesa sin cumplir y la información a medias. El
+      // precio es que la respuesta espera su turno en la cola: se sintetiza
+      // mientras la muletilla suena, así que al terminar ya está esperando.
+      cola.push([audioBase64, visemas, relleno]);
       if (encadenando) return Promise.resolve();
       encadenando = true;
       return siguiente();
