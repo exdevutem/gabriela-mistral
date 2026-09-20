@@ -96,7 +96,8 @@ Variables que conviene fijar en el contenedor:
 | `LLM_CTX` | `2048` | Contexto del LLM. Subirlo cuesta RAM. |
 | `LLM_THREADS` | todos los núcleos | Hilos de llama.cpp. |
 | `LLM_GGUF` | `Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M` | Otro modelo. |
-| `MULETILLAS_DIR` | `/modelos/muletillas` | Dónde se graban los titubeos. |
+| `MULETILLAS_DIR` | `/modelos/muletillas` | Dónde se graba el relleno hablado. |
+| `FRECUENTES_DIR` | `/modelos/frecuentes` | Dónde se graban las respuestas de los badges. |
 
 ## Cuánta RAM y CPU asignarle
 
@@ -177,7 +178,8 @@ contra el contenedor ya desplegado.
 ### El arranque también cuenta
 
 El contenedor tarda unos **40 s en aceptar visitas**, y el **primer** arranque
-sobre un `/modelos` vacío unos 70 s, porque además graba las cuatro muletillas.
+sobre un `/modelos` vacío unos 9 minutos, porque además graba las 24 frases de
+muletilla y las 68 de las respuestas frecuentes.
 Ese calentamiento no es opcional —sin él, la primera respuesta costaba **390 s**
 en lugar de 51— así que no lo quites para que el arranque parezca más rápido.
 

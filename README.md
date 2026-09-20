@@ -18,10 +18,23 @@ tu mensaje ──> Groq o llama.cpp ──> NeuTTS nano-spanish ──> PCM 24 k
 ```
 
 Ella habla por frases: el servidor manda cada una en cuanto la sintetiza, en vez
-de esperar a tener la respuesta entera. Así empieza a hablar en unos 20 s en
-lugar de 70, y termina en 48 en lugar de 85. Y como treinta segundos de estatua muda se leen como que el programa
-murió, mientras tanto suelta una **muletilla ya grabada** —«Déjame pensar.»— y
-la página dice en qué va: *preparando la voz… 2 de 4*.
+de esperar a tener la respuesta entera. Y como una estatua muda se lee como que
+el programa murió, mientras tanto cuenta algo del museo con una **muletilla ya
+grabada** —«Mientras busco las palabras, déjame contarte dónde estás…»— y la
+página dice en qué va: *preparando la voz… 2 de 4*.
+
+Esas muletillas duran unos 20 s y **se oyen enteras**, aunque la respuesta ya
+esté lista: prometen contar algo del museo y cortarlas dejaría la información a
+medias. La respuesta se sintetiza mientras suenan y espera su turno, así que el
+precio es que empieza a oírse al terminar el relleno.
+
+Bajo la caja de texto hay **badges con preguntas frecuentes** —qué fue este
+edificio, quién fue Brígida Walker, si tenía título de maestra—. Esas respuestas
+están **grabadas, no las escribe el modelo**: suenan en 0,04 s, no pasan por el
+LLM y dicen siempre lo mismo. En un museo eso importa más que la variedad: una
+fecha inventada es una fecha que el visitante se lleva a casa. Las preguntas
+frecuentes sí quedan en el historial, así que un «¿y eso por qué?» a
+continuación llega al modelo con contexto.
 
 El labio-sincronizado combina dos fuentes: los **tiempos** salen de la energía del
 audio real y las **formas de boca** del texto. Los visemas se reparten según
@@ -221,9 +234,17 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 - **El servidor tarda ~40 s en arrancar porque calienta el modelo**, y no es
   opcional: sin hacerle decir una palabra al inicio, la primera respuesta
   costaba **390 s** en vez de 51. Cargar los pesos no basta.
-- Las **muletillas** se graban en ese mismo arranque, la primera vez (unos 70 s),
-  y se guardan en `assets/voz/muletillas/`. Si cambias la voz de referencia,
-  borra esa carpeta o seguirá titubeando con la voz vieja.
+- Las **muletillas** y las **respuestas frecuentes** se graban en ese mismo
+  arranque, la primera vez: 24 frases (175 s) y 68 frases (342 s), en
+  `assets/voz/muletillas/` y `assets/voz/frecuentes/`, un archivo por frase. Si
+  cambias la voz de referencia, el modelo o el device, borra esas carpetas o
+  seguirá hablando con la voz vieja.
+- **Las frases de muletilla tienen que ser cortas** (`MAX_BYTES_MULETILLA`, 70
+  bytes ≈ 5 s). El visor descarta el relleno pendiente cuando llega la
+  respuesta, pero deja terminar la frase que suena: esa frase es el retraso
+  máximo que el relleno le cuesta a la respuesta. Con una frase de 9,2 s, la
+  respuesta pasó de entrar a los 9 s a entrar a los 24. Hay un test que lo
+  vigila.
 
 ## Pendiente
 

@@ -44,20 +44,70 @@ de 2026):
 | una respuesta de 10 s     | 10,2 s |         30,0 s | 13,1 s |
 | **factor de tiempo real** |        |       **4,08** | **1,45** |
 
-Arranque completo (`calentar()`, con las cuatro muletillas): **43,4 s**.
+Arranque completo (`calentar()`): **43,4 s** con las muletillas ya grabadas.
+Grabarlas la primera vez son 174 s más, una sola vez.
 
 NeuTTS habla más pausado que F5 en frases cortas —la misma muletilla le dura el
 doble— y no tiene perilla de velocidad: el ritmo sale de la referencia.
 
 ## Muletillas
 
-`muletillas/` son las frases cortas que dice mientras piensa —«Déjame pensar.»,
-«Mmm. Espera un momento.»— para que la espera no empiece en silencio. Las graba el servidor al arrancar, una sola vez, con esta misma voz de
-referencia.
+`muletillas/` es lo que dice mientras piensa, para que la espera no empiece en
+silencio. Ya no son titubeos sueltos: cada una cuenta algo del museo —dónde
+está parado el visitante, qué fue este edificio, qué se guarda aquí— durante
+unos 20 s. Las graba el servidor al arrancar, una sola vez, con esta misma voz
+de referencia.
 
-**Si cambias la referencia o el modelo, borra esa carpeta**: si no, seguirá
-titubeando con la voz anterior y cambiando de timbre a mitad de respuesta. El
-texto de las frases está en `MULETILLAS`, en `config.py`.
+Se guarda **un archivo por frase** (`0-0.wav`, `0-1.wav`, …) porque el servidor
+las manda troceadas: el visor descarta las que no alcanzaron a sonar en cuanto
+llega la respuesta. Por eso el largo no se paga. Una muletilla a la que le
+falte un trozo no se usa: se cortaría a mitad de la historia.
+
+**Las frases tienen que ser cortas**, bajo `MAX_BYTES_MULETILLA` (70 bytes, unos
+5 s). El visor deja terminar la frase que está sonando, así que ésa es la espera
+máxima que el relleno le añade a la respuesta. Hay un test que lo comprueba.
+
+**Si cambias la referencia, el modelo o el device, borra esa carpeta**: si no,
+seguirá titubeando con la voz anterior y cambiando de timbre a mitad de
+respuesta. El texto está en `MULETILLAS`, en `config.py`.
+
+## Preguntas frecuentes
+
+`frecuentes/` son las respuestas a los badges de la página, grabadas igual que
+las muletillas y con el mismo formato (`0-0.wav`, `0-1.wav`, …). Están en
+`FRECUENTES`, en `config.py`, como pares de pregunta y respuesta.
+
+Van grabadas y no las escribe el modelo por una razón concreta: un visitante que
+toca «¿desde cuándo existe el museo?» tiene que oír 1941, siempre, y no la fecha
+que el modelo recuerde ese día. Además responden en 0,04 s. Sólo se ofrecen como
+badge las que están **completas**: si a una le falta un trozo, la pregunta cae en
+el LLM, que al menos contesta entera.
+
+### De dónde salen los datos
+
+Todo lo que dice de este museo está verificado contra dos fuentes:
+
+- la historia oficial del museo (`museodelaeducacion.gob.cl`): fundado en 1941
+  como Museo Pedagógico de Chile, trasladado en 1981 al edificio de la Escuela
+  Normal de Niñas Nº1 Brígida Walker (que funcionó allí de 1886 a 1973), cerrado
+  en 1985 por el terremoto y reabierto el 8 de marzo de 2006 con el nombre de
+  Gabriela Mistral —porque fue ahí donde ella obtuvo su habilitación como
+  profesora primaria, en 1910—;
+- *Lucila Gabriela: La voz de la Maestra* (MEGM, 2008), de María Isabel Orellana
+  y Pedro Pablo Zegers, que documenta su relación con Brígida Walker y que nunca
+  tuvo título de Escuela Normal.
+
+Los datos concretos que se usan hoy: fundación en 1941 como Museo Pedagógico de
+Chile; traslado en 1981; escuela de niñas entre 1886 y 1973; terremoto de 1985 y
+reapertura el 8 de marzo de 2006; habilitación de Gabriela Mistral en 1910 en
+esta casa; nacimiento el 7 de abril de 1889 en Vicuña; Vasconcelos y la reforma
+mexicana en 1922; Nobel de Literatura en 1945; muerte el 10 de enero de 1957 en
+Nueva York; la escuela nocturna de La Cantera; los liceos de Punta Arenas,
+Temuco y el Nº6 de Santiago.
+
+**Si agregas una muletilla o una frecuente, verifica igual.** Habla en primera
+persona sobre un museo real: una fecha inventada aquí es una fecha que un
+visitante se lleva a casa creyendo que se la dijo Gabriela Mistral.
 
 ## Procedencia
 
