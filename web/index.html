@@ -29,12 +29,24 @@
            background: #7a6a55; color: #14100e; cursor: pointer; }
   button:disabled { opacity: .45; cursor: default; }
   #aviso { margin: 0; font-size: .78rem; color: var(--tenue); text-align: center; }
+  /* Late mientras se genera la voz: medio minuto de página quieta se lee como
+     que el programa murió, justo cuando más está trabajando. */
+  #progreso { margin: 0; min-height: 1.4em; font-size: .85rem; color: var(--tenue);
+              font-style: italic; }
+  #progreso:not(:empty)::after {
+    content: '·'; margin-left: .35em; animation: latido 1.2s steps(1) infinite;
+  }
+  @keyframes latido { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .15; } }
+  @media (prefers-reduced-motion: reduce) {
+    #progreso::after { animation: none; }
+  }
 </style>
 </head>
 <body>
   <canvas id="lienzo" aria-label="Retrato animado de Gabriela Mistral"></canvas>
   <div id="pie">
     <p id="dicho" role="status" aria-live="polite"></p>
+    <p id="progreso" role="status" aria-live="polite"></p>
     <form id="forma">
       <input id="entrada" autocomplete="off" autofocus
              placeholder="Pregúntale algo…" aria-label="Tu mensaje">
@@ -50,6 +62,7 @@ import { crearAvatar } from './static/avatar.js';
 const dicho = document.getElementById('dicho');
 const entrada = document.getElementById('entrada');
 const enviar = document.getElementById('enviar');
+const progreso = document.getElementById('progreso');
 const forma = document.getElementById('forma');
 
 const avatar = await crearAvatar(document.getElementById('lienzo'));
@@ -58,22 +71,44 @@ const ws = new WebSocket(`ws://${location.host}/ws`);
 const ocupado = (si) => { enviar.disabled = si; entrada.disabled = si; if (!si) entrada.focus(); };
 ocupado(true);
 
+// La voz tarda medio minuto en generarse. Sin decir en qué va, la página
+// parece colgada justo cuando más está trabajando.
+let esperadas = 0, llegadas = 0;
+function avance() {
+  if (!esperadas || llegadas >= esperadas) { progreso.textContent = ''; return; }
+  progreso.textContent = llegadas
+    ? `preparando la voz… ${llegadas} de ${esperadas}`
+    : 'preparando la voz…';
+}
+
 ws.onmessage = ({ data }) => {
   const m = JSON.parse(data);
   if (m.tipo === 'listo')    { dicho.textContent = ''; ocupado(false); }
+  if (m.tipo === 'pensando') { esperadas = 0; llegadas = 0; }
   if (m.tipo === 'pensando') { dicho.className = 'pensando'; dicho.textContent = 'pensando…'; }
-  if (m.tipo === 'texto')    { dicho.className = ''; dicho.textContent = m.texto; }
+  if (m.tipo === 'texto')    {
+    dicho.className = '';
+    dicho.textContent = m.texto;
+    esperadas = m.partes; llegadas = 0; avance();
+  }
   if (m.tipo === 'habla')    {
+    // Llega una frase por mensaje, según el servidor las va sintetizando. La
+    // entrada no se libera hasta la última: mientras habla, no toca interrumpir.
     // Si el navegador bloquea la reproducción automática, la boca se movería en
     // silencio y nadie sabría por qué. Mejor decirlo.
     avatar.hablar(m.audio, m.visemas).catch(() => {
-      dicho.textContent = m.texto + '\n\n(El navegador bloqueó el audio: haz clic en la página y vuelve a preguntar.)';
+      dicho.textContent += '\n\n(El navegador bloqueó el audio: haz clic en la página y vuelve a preguntar.)';
     });
-    ocupado(false);
+    llegadas++; avance();
+    if (m.fin) ocupado(false);
   }
-  if (m.tipo === 'error')    { dicho.className = 'pensando'; dicho.textContent = m.texto; ocupado(false); }
+  if (m.tipo === 'error')    {
+    dicho.className = 'pensando'; dicho.textContent = m.texto;
+    esperadas = 0; avance(); ocupado(false);
+  }
 };
-ws.onclose = () => { dicho.textContent = 'Se cortó la conexión con el servidor.'; ocupado(true); };
+ws.onclose = () => { dicho.textContent = 'Se cortó la conexión con el servidor.';
+                     esperadas = 0; avance(); ocupado(true); };
 
 forma.onsubmit = (e) => {
   e.preventDefault();

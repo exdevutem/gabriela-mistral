@@ -62,6 +62,8 @@ export async function crearAvatar(canvas) {
 
   const objetivo = new Float32Array(malla.morphTargetInfluences.length);
   let pista = null, audio = null, cursor = 0, manual = false;
+  const cola = [];      // frases pendientes; el servidor las manda de a una
+  let encadenando = false;
 
   function ajustar() {
     const { clientWidth: w, clientHeight: h } = canvas;
@@ -70,6 +72,18 @@ export async function crearAvatar(canvas) {
       camara.aspect = w / h;
       camara.updateProjectionMatrix();
     }
+  }
+
+  function siguiente() {
+    const parte = cola.shift();
+    if (!parte) { encadenando = false; pista = null; objetivo.fill(0); return Promise.resolve(); }
+    const [audioBase64, visemas] = parte;
+    pista = visemas;
+    cursor = 0;
+    audio = new Audio('data:audio/wav;base64,' + audioBase64);
+    // Sin esto queda una pausa entre frases mientras el bucle nota el final.
+    audio.onended = siguiente;
+    return audio.play();
   }
 
   const reloj = new THREE.Clock();
@@ -86,7 +100,7 @@ export async function crearAvatar(canvas) {
       if (indices[visema] !== undefined) objetivo[indices[visema]] = peso;
     } else if (pista && audio && audio.ended) {
       objetivo.fill(0);
-      pista = null;
+      if (!cola.length) pista = null;  // con más frases en cola, 'ended' encadena
     }
 
     if (!manual) {
@@ -109,12 +123,17 @@ export async function crearAvatar(canvas) {
   return {
     nombres,
     malla,  // expuesta para inspección desde la página de ajuste
+    /**
+     * Encola una frase. El servidor las manda una a una según las sintetiza, así
+     * que ella empieza a hablar con la primera mientras llegan las demás; si se
+     * reprodujera cada una al recibirla, se pisarían.
+     */
     hablar(audioBase64, visemas) {
       manual = false;
-      pista = visemas;
-      cursor = 0;
-      audio = new Audio('data:audio/wav;base64,' + audioBase64);
-      return audio.play();
+      cola.push([audioBase64, visemas]);
+      if (encadenando) return Promise.resolve();
+      encadenando = true;
+      return siguiente();
     },
     /** Para la página de ajuste: fija un morph target a mano. */
     fijar(nombre, peso) {
