@@ -1,0 +1,11 @@
+.git
+.venv
+.playwright-mcp
+assets/flame
+assets/fotos
+assets/voz
+pipeline
+tests
+uv.lock
+**/__pycache__
+.env
