@@ -10,12 +10,18 @@ mueve la cara mientras lo hace. Backend en Python, render en el navegador.
 ## Cómo funciona
 
 ```
-tu mensaje ──> Gemini (texto) ──> Gemini TTS ──> PCM 24 kHz
+tu mensaje ──> Groq o llama.cpp ──> F5-TTS español ──> PCM 24 kHz
                                         │
                         envolvente RMS ─┴─ visemas del texto
                                         │
                  {audio, timeline} ──> three.js ──> morph targets
 ```
+
+Ella habla por frases: el servidor manda cada una en cuanto la sintetiza, en vez
+de esperar a tener la respuesta entera. Así empieza a hablar en unos 20 s en
+lugar de 70, y termina en 48 en lugar de 85. Y como treinta segundos de estatua muda se leen como que el programa
+murió, mientras tanto suelta una **muletilla ya grabada** —«Déjame pensar.»— y
+la página dice en qué va: *preparando la voz… 2 de 4*.
 
 El labio-sincronizado combina dos fuentes: los **tiempos** salen de la energía del
 audio real y las **formas de boca** del texto. Los visemas se reparten según
@@ -23,16 +29,34 @@ energía acumulada, no según tiempo, así que las pausas del TTS no desfasan la
 
 ## Requisitos
 
+La voz corre siempre en local. El texto puede venir de un proveedor externo
+compatible con OpenAI o de un modelo local; el código es el mismo.
+
 - Python 3.13 y [uv](https://docs.astral.sh/uv/)
-- Una API key de [Google AI Studio](https://aistudio.google.com/apikey) en `.env`
+- Una voz de referencia en `assets/voz/` (ver más abajo)
+- Para el texto, una de dos:
+  - una clave gratuita de [Groq](https://console.groq.com/keys) (sin tarjeta), o
+  - [llama.cpp](https://github.com/ggml-org/llama.cpp) (`brew install llama.cpp`)
+    con un GGUF instruct, si prefieres no depender de la red
 
 ```bash
 uv sync
-cp .env.example .env    # y pega tu GEMINI_API_KEY
+cp .env.example .env    # y pega tu LLM_API_KEY
 ```
 
-Si tienes `GEMINI_API_KEY` exportada en tu shell, el `.env` del proyecto manda:
-`config.py` carga con `override=True`.
+### La voz
+
+F5-TTS no tiene voces prefabricadas: **clona** la que le des. Deja en `assets/voz/`
+un `referencia.wav` de 7–10 s de habla limpia y un `referencia.txt` con su
+transcripción exacta.
+
+**Ojo con la duración**: F5-TTS recorta el audio a 12 s pero usa el texto entero
+que le pases, así que un `.wav` largo con su transcripción completa sale
+atropellado. Y el largo de la referencia se paga en cada síntesis. Cómo recortar
+y transcribir, en `assets/voz/README.md`.
+
+El checkpoint ([`jpgallegoar/F5-Spanish`](https://huggingface.co/jpgallegoar/F5-Spanish),
+~1,3 GB, CC BY-NC 4.0) se descarga solo la primera vez a la caché de Hugging Face.
 
 ## Puesta en marcha
 
@@ -40,8 +64,29 @@ Si tienes `GEMINI_API_KEY` exportada en tu shell, el `.env` del proyecto manda:
 uv run uvicorn gabriela.server:app --port 8000
 ```
 
+Para usar un modelo local en lugar de Groq, deja `LLM_API_KEY` vacía, descomenta
+`LLM_URL` y `LLM_MODEL` en el `.env`, y levanta antes:
+
+```bash
+llama-server -hf Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M --port 8080 -c 4096
+```
+
+Arranca cargando F5-TTS —~1,3 GB, unos segundos—, para no pagarlo en la primera
+pregunta con el usuario mirando un «pensando» eterno.
+
 - `http://localhost:8000` — la conversación
 - `http://localhost:8000/debug` — un slider por morph target, para afinar visemas
+
+## Despliegue
+
+Hay un `Dockerfile` con las dos mitades en una imagen, pensado para publicarla en
+`ghcr.io` y levantarla como contenedor en Proxmox. El build necesita el `.glb` ya
+generado y la voz de referencia se monta en vez de hornearse. Requisitos, flujo,
+y cuánta RAM y CPU pedirle al nodo: [`docker/README.md`](docker/README.md).
+
+La versión corta: **6 GB de RAM y 8 vCPU** usando Groq para el texto (8 GB si
+levantas el modelo local). La latencia de la voz es el problema pendiente: más
+de dos minutos por respuesta en el hardware del cluster.
 
 ## La cabeza
 
@@ -106,6 +151,7 @@ rotar la mandíbula baja la barbilla mientras el cráneo queda quieto.
 
 ```bash
 uv run python tests/test_visemes.py                          # lógica de visemas
+uv run python tests/test_local.py                            # chat y formato de audio
 uv run python pipeline/landmarks.py assets/fotos/mistral-1946-frontal.jpg
 uv run python -m gabriela.chat "¿Quién eres?"                # solo texto
 uv run python -m gabriela.voice "Hola" --out /tmp/g.wav      # solo voz
@@ -128,10 +174,43 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   curl -sL -o assets/models/face_landmarker.task \
     https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
   ```
-- **Modelos de Gemini**: `gemini-3.1-flash-lite` con razonamiento apagado responde
-  en ~2,6 s; `gemini-3.6-flash` tarda ~24 s, demasiado para conversar. El TTS
-  (`gemini-3.1-flash-tts-preview`) tarda ~15 s en frases largas y no admite
-  streaming por esta vía.
+- **PyTorch sí llega, pero por la voz**: F5-TTS lo arrastra (~2,5 GB). El
+  pipeline de la cabeza sigue sin tocarlo —lee FLAME con stubs propios—, así que
+  quien solo construya el modelo no necesita instalarlo.
+- **Groq retira modelos cada pocos meses** (`llama-3.3-70b-versatile` murió en
+  agosto de 2026). Si el chat empieza a dar 404, lista los vivos con
+  `curl -s https://api.groq.com/openai/v1/models -H "Authorization: Bearer $LLM_API_KEY"`
+  y ajusta `LLM_MODEL`.
+- **Elegir el GGUF**, si vas por local: en un M2 de 8 GB un 3B en Q4 convive con
+  F5-TTS; un 7B no. Si el modelo razona (Qwen3 y parientes), `chat.py` le quita
+  el bloque `<think>` antes de mandarlo al TTS, que si no lo leería en voz alta.
+- **Perillas de la voz** (variables de entorno, ver `.env.example`):
+  `F5_NFE_STEP` baja la latencia a costa de calidad —16 va casi al doble de
+  rápido que 32—, `F5_VELOCIDAD` ajusta la cadencia y `F5_DEVICE` fuerza
+  `mps`/`cpu` si la autodetección se equivoca.
+- **FFmpeg no hace falta**: `torchaudio` 2.11 lee siempre vía `torchcodec`, que
+  solo carga con FFmpeg 4–7 y revienta contra el 9 de Homebrew. `voice.py`
+  sustituye `torchaudio.load` por `soundfile`, que trae su propia libsndfile.
+  El día que torchcodec soporte el FFmpeg instalado, ese parche se borra.
+- **F5-TTS se cae en MPS con respuestas de más de un bloque.** El proceso muere
+  sin traza en cuanto el texto da para dos trozos, que es cualquier respuesta de
+  dos frases. Por eso `F5_DEVICE` es `cpu` por defecto incluso en Apple Silicon,
+  aunque MPS vaya 4 veces más rápido en las frases sueltas que sí sobrevive.
+- Medido end-to-end en un M2 con la CPU: la síntesis tarda **5 veces el tiempo
+  del audio** que produce, así que todo lo que acorta la respuesta acorta la
+  espera. Con `F5_NFE_STEP=8` y respuestas de dos frases, la primera suena a los
+  18-26 s y termina a los 48; sin esos dos ajustes eran 70 y 85.
+- **`max_tokens` está en 90 a propósito.** No es por ahorrar tokens: cada frase
+  de más es un bloque más que sintetizar. Va junto con la orden de brevedad en
+  `persona.py`, porque ninguna de las dos basta sola: el modelo se pasa igual, y
+  cortar sin más deja la frase a medias (`chat.py` la recorta a la última
+  completa).
+- **El servidor tarda ~40 s en arrancar porque calienta el modelo**, y no es
+  opcional: sin hacerle decir una palabra al inicio, la primera respuesta
+  costaba **390 s** en vez de 51. Cargar los pesos no basta.
+- Las **muletillas** se graban en ese mismo arranque, la primera vez (unos 70 s),
+  y se guardan en `assets/voz/muletillas/`. Si cambias la voz de referencia,
+  borra esa carpeta o seguirá titubeando con la voz vieja.
 
 ## Pendiente
 
@@ -153,4 +232,4 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 - **Parecido**: el ajuste monocular sólo observa 51 landmarks frontales, así que
   recupera proporciones, no rasgos finos. Una segunda vista de perfil ayudaría,
   pero no hay ninguna en dominio público con resolución suficiente.
-- Parpadeo, y voz a voz con micrófono (`gemini-3.1-flash-live-preview`).
+- Parpadeo, y voz a voz con micrófono (whisper.cpp del lado de la escucha).

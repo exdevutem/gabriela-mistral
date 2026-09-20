@@ -22,9 +22,14 @@ proyecto universitario sobre una Nobel eso hace más daño que un olvido honesto
 
 ```bash
 uv sync
-cp .env.example .env          # y pega tu GEMINI_API_KEY
+cp .env.example .env          # y pega tu LLM_API_KEY de Groq
 uv run uvicorn gabriela.server:app --port 8000
 ```
+
+La voz corre siempre en la máquina. El texto sale por Groq —nivel gratuito, sin
+tarjeta— o por un `llama-server` local si se prefiere no depender de la red.
+Hace falta, eso sí, una voz de referencia en `assets/voz/` — ver *Dependencias
+externas*.
 
 - `localhost:8000` — la conversación
 - `localhost:8000/debug` — un slider por morph target, para afinar visemas
@@ -53,7 +58,7 @@ foto → landmarks (mediapipe) → ajuste FLAME (scipy) → volumen de pelo
 **Runtime** — FastAPI, WebSocket y three.js:
 
 ```
-texto → Gemini (chat) → Gemini TTS → PCM 24 kHz
+texto → Groq o llama.cpp → F5-TTS español → PCM 24 kHz
                               │
               envolvente RMS ─┴─ visemas del texto
                               │
@@ -86,9 +91,31 @@ adelantan la boca.
 
 Cada número de esta sección salió de medirlo, no de estimarlo.
 
-**Modelo de lenguaje: `gemini-3.1-flash-lite` con razonamiento apagado.** Responde en
-2,6 s frente a los 24 s de `gemini-3.6-flash`. Una conversación hablada no tolera
-esperas largas. `gemini-2.5-flash` ya no está disponible para cuentas nuevas.
+**La voz en local, el texto donde convenga.** La voz pasó a F5-TTS y ahí se
+queda: es lo distintivo del prototipo. El chat habla una API compatible con
+OpenAI, y eso deja las dos puertas abiertas con el mismo código —Groq en su nivel
+gratuito, o un `llama-server` local— porque el compromiso entre ambas no es
+obvio y cambia con el hardware que haya.
+
+**Por defecto, Groq.** Un 3B local cabía en 8 GB pero no seguía la persona:
+preguntado "¿quién eres?" respondía con una ficha de enciclopedia en vez de las
+dos o tres frases que pide el prompt. Un modelo grande por API lo hace mejor,
+responde antes y libera 2,4 GB de RAM en el nodo. A cambio, depende de la red y
+de una cuota. Si el GGUF local razona, `chat.py` le corta el bloque `<think>`:
+de otro modo el TTS lo leería en voz alta.
+
+**Respuestas cortas por contrato, no por confianza.** `max_tokens` a 90, la
+persona ordenando dos frases, y truncado a la última completa. Hacen falta las
+tres: el modelo se pasa del límite que le pides por escrito, y cortar sin más
+deja la frase colgada, que hablada suena a fallo. Medido, bajó la media de 2-4
+bloques por respuesta a **1,4**, y con ella la espera de 135 s a 48. No es por
+ahorrar tokens: cada frase de más es un bloque más que sintetizar. Una de ocho
+líneas llegó a tumbar el servidor por memoria.
+
+**Voz: clonación, no voz prefabricada.** F5-TTS reproduce el timbre de
+`assets/voz/referencia.wav`. Es una libertad que Gemini no daba —se elegía entre
+un catálogo— y también una responsabilidad: quien ponga ese audio decide cómo
+suena ella, y de dónde salió debe quedar documentado.
 
 **Regularización del ajuste: 10.** Con 2, el error de reproyección baja a 5,3 px pero
 el cráneo se aleja un 20 % de la forma media; con 10 el error solo sube a 7,2 px y el
@@ -153,8 +180,55 @@ ejecutaba el viejo. Resuelto con `Cache-Control: no-store`.
 veía. Los vértices que miran hacia atrás muestrean la cara por el otro lado. Para una
 conversación cara a cara alcanza; si se quiere permitir orbitar el modelo, se rompe.
 
-**La latencia la marca el TTS.** El chat responde en ~2,6 s, pero la síntesis tarda
-~15 s en frases largas y no admite streaming por esta vía.
+**La latencia la marca el TTS.** Sigue siendo el cuello de botella, ahora contra la
+CPU local en vez de la red, y ahora es **el problema abierto del proyecto**. El
+texto llega de Groq en menos de un segundo; la síntesis tarda 4-5 veces el
+tiempo del audio que produce. Medido end-to-end: 70 s para una respuesta de 15 s
+de voz, 149 s para otra de 16,6 s. En los Xeon del cluster será peor.
+
+**Se habla por frases.** El servidor trocea la respuesta con el propio
+`chunk_text` de F5 —así cada trozo coincide con lo que el modelo sintetizaría de
+una pieza— y manda cada frase en cuanto está lista. Lo que importa no es el
+total, sino cuándo empieza a sonar: de 70 s a 30 s.
+
+| | Primera palabra | Silencio entre frases | Termina |
+|---|---|---|---|
+| Sin trocear | 70 s | — | 85 s |
+| Por frases, `nfe_step=16` | 51 s | 49 s | 120 s |
+| Por frases, `nfe_step=8` | 30 s | 8 s | 55 s |
+| + respuestas de dos frases | **18-26 s** | 9-17 s | **48 s** |
+
+El silencio entre frases es irreducible mientras la síntesis tarde más que el
+audio que produce: la voz nunca alcanza a la reproducción. Con 8 pasos son 8 s,
+que se leen como una pausa de quien piensa; con 16 son 49 s, que se leen como
+que se colgó.
+
+Las otras perillas, todas medidas: acortar la referencia de 11,8 s a 7,6 s
+ahorra un 26 % —F5-TTS genera la referencia y la frase juntas, así que su largo
+se paga en cada síntesis—, y `max_tokens` acorta la respuesta.
+
+**Mientras espera, habla.** Treinta segundos de busto inmóvil no se leen como
+"está pensando" sino como "se colgó". Dos cosas lo tapan: una muletilla grabada
+—«Déjame pensar.», «Mmm. Espera un momento.»— que suena a 1,5 s de la pregunta,
+y un indicador que dice en qué va (*preparando la voz… 2 de 4*) en vez de girar
+sin fondo. Las muletillas se graban una vez al arrancar, con la misma voz de
+referencia, y reutilizan la misma cola de reproducción que las frases reales:
+no hubo que añadir camino nuevo, solo encolar antes.
+
+Verificado en navegador: la muletilla suena a 1,5 s, el indicador aparece a los
+2 s, ninguna frase se solapa con otra.
+
+**Calentar el modelo al arrancar no es una optimización, es un requisito.**
+Cargar los pesos no basta: la primera inferencia real paga además la preparación
+del audio de referencia y la puesta en marcha de los kernels de torch. Medido:
+**390 s** la primera respuesta frente a 51 las siguientes. El servidor le hace
+decir una palabra antes de aceptar visitas, y por eso tarda ~40 s en levantar.
+
+**MPS no se puede usar.** En Apple Silicon la síntesis va 4 veces más rápida
+(11,6 s frente a 44 s), pero el proceso muere sin traza en cuanto F5 parte el
+texto en más de un bloque —es decir, en cualquier respuesta de dos frases—. Se
+verificó que en CPU el mismo texto funciona. Por eso `F5_DEVICE` es `cpu` por
+defecto: un valor rápido que tumba el servidor no es un valor.
 
 **Una sola vista.** El ajuste monocular recupera proporciones, no profundidad. No hay
 ninguna foto de perfil suya en dominio público con resolución suficiente; la mejor
@@ -169,13 +243,13 @@ lo que debería.
 
 En orden de rendimiento por esfuerzo.
 
-**1. Voz a voz con micrófono.** `gemini-3.1-flash-live-preview` está disponible con
-esta cuenta y es el camino natural: elimina el teclado y hace la interacción
-presencial. Es el paso que más cambia la experiencia.
+**1. Voz a voz con micrófono.** whisper.cpp del lado de la escucha cierra el círculo
+sin salir de local: elimina el teclado y hace la interacción presencial. Es el paso
+que más cambia la experiencia.
 
-**2. Reducir la latencia del habla.** Trocear la respuesta en frases y sintetizarlas
-en cadena, empezando a hablar con la primera mientras se generan las siguientes.
-Convierte 15 s de espera en unos 3.
+**2. Acortar las respuestas.** Ya se habla por frases; lo que queda es que haya
+menos que decir. `max_tokens` a 90 y un prompt más severo: la mitad de audio es
+la mitad de espera.
 
 **3. Parpadeo.** Falta el único gesto involuntario que el modelo no tiene, y es de los
 que más separan un rostro vivo de una máscara. FLAME lo permite con un morph target
@@ -204,9 +278,22 @@ falta tres archivos en `assets/flame/`:
 
 **Modelo de landmarks de mediapipe** — se descarga aparte, la orden está en el README.
 
-**API de Google AI Studio** — clave en `.env`. Ojo: `config.py` carga con
-`override=True` a propósito, porque una variable exportada en el shell ganaba sobre el
-`.env` del proyecto y devolvía 400.
+**Checkpoint de F5-Spanish** (`jpgallegoar/F5-Spanish`, ~1,3 GB, CC BY-NC 4.0) — se
+descarga solo a la caché de Hugging Face. Licencia no comercial, igual que FLAME:
+encaja con un proyecto universitario.
+
+**Voz de referencia** — `assets/voz/referencia.wav` (7–10 s de habla limpia) y
+`referencia.txt` con su transcripción exacta. No se versiona; su procedencia va
+documentada junto a ella. **Trampa**: F5-TTS recorta el audio a 12 s pero usa el
+texto entero, así que un `.wav` largo con su transcripción completa hace que el
+modelo crea que cientos de caracteres caben en 12 s, y la voz sale atropellada.
+Recortar a mano y transcribir sólo el trozo; el cómo está en `assets/voz/README.md`.
+
+**Clave de Groq** — gratuita y sin tarjeta en console.groq.com/keys, en `.env`
+como `LLM_API_KEY`. Groq retira modelos cada pocos meses, así que `LLM_MODEL` es
+configurable y `chat.py` distingue el 404 de "ese modelo ya no existe" del resto.
+
+**Un GGUF instruct**, sólo en modo local — lo descarga `llama-server -hf …`.
 
 ## Fotografías y atribución
 
