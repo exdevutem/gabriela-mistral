@@ -194,14 +194,34 @@ total, sino cuándo empieza a sonar: de 70 s a 30 s.
 |---|---|---|---|
 | Sin trocear | 70 s | — | 85 s |
 | Por frases, `nfe_step=16` | 51 s | 49 s | 120 s |
-| Por frases, `nfe_step=8` | 30 s | 8 s | 55 s |
-| + respuestas de dos frases | **18-26 s** | 9-17 s | **48 s** |
+| Por frases + respuestas cortas, `nfe_step=16` (actual) | **47-54 s** | 31-34 s | **96-101 s** |
+| Lo mismo con `nfe_step=8` | 18-26 s | 9-17 s | 48 s |
 
-**Ojo con la última fila: es con `F5_NFE_STEP=8`, y el valor por defecto es 16.**
-Se dejó en 16 porque nadie ha comparado aún las dos muestras de oído, y bajar la
-calidad de la voz sin escucharla no es una decisión que deba tomarse sola. Con
-el default, la primera palabra tarda alrededor del doble. Decidirlo es de lo
-primero que hay que hacer al retomar.
+**`nfe_step` se queda en 16, aunque 8 cueste menos de la mitad.** La diferencia
+no es de calidad gradual. Generando la misma frase con la misma semilla y
+comparando contra `nfe=64`:
+
+| `nfe` | corr. envolvente | dif. timbre | coste |
+|---|---|---|---|
+| 8 | 0,225 | 5,08 dB | 16 s |
+| 12 | 0,296 | 3,91 dB | 24 s |
+| **16** | **0,974** | **1,89 dB** | **33 s** |
+| 20 | 0,606 | 3,23 dB | 39 s |
+| 32 | 0,976 | 1,58 dB | 64 s |
+| 64 | 1,000 | — | 125 s |
+
+16, 32 y 64 coinciden entre sí; 8, 12 y 20 no. La curva no es monótona porque el
+muestreador cae en trayectorias distintas según cómo se discretice, no porque
+"menos pasos" sea "peor" de forma proporcional. Con 8 pasos no sale la misma voz
+algo degradada: sale otra interpretación, con las sílabas en otros sitios.
+
+16 es entonces el valor más barato que da el mismo resultado que los altos, y ya
+ahorra la mitad frente al 32 por defecto de F5.
+
+**El límite de esta medición:** compara consistencia con el modelo convergido, no
+cómo suena. Nadie ha escuchado las muestras todavía. Si `nfe=8` resulta
+aceptable de oído, bajarlo quita 30 segundos de espera y es la mejora más grande
+que queda sin tocar hardware.
 
 El silencio entre frases es irreducible mientras la síntesis tarde más que el
 audio que produce: la voz nunca alcanza a la reproducción. Con 8 pasos son 8 s,
@@ -248,9 +268,11 @@ lo que debería.
 
 En orden de rendimiento por esfuerzo.
 
-**0. Decidir `F5_NFE_STEP` escuchando.** Hay muestras con 8 y con 16 pasos. Si 8
-suena aceptable, el default baja a 8 y la espera se parte por la mitad sin tocar
-una línea de código. Cuesta cinco minutos y es lo que más mejora la demostración.
+**0. Escuchar `nfe=8` y confirmar o revocar.** El default está en 16 por medición
+objetiva (ver *Límites actuales*), pero esa medición no oye. Hay muestras de la
+misma frase con 8, 16 y 32 pasos. Si 8 resulta aceptable, cambiar `F5_NFE_STEP`
+quita 30 segundos de espera sin tocar una línea de código. Cuesta dos minutos y
+es lo que más mejora la demostración.
 
 **1. Voz a voz con micrófono.** Elimina el teclado y hace la interacción
 presencial: es el paso que más cambia la experiencia. Dos caminos, y conviene
