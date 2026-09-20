@@ -57,6 +57,7 @@ RUN chmod +x /usr/local/bin/arranque.sh
 ENV PYTHONPATH=/app/src \
     HF_HOME=/modelos/hf \
     MULETILLAS_DIR=/modelos/muletillas \
+    FRECUENTES_DIR=/modelos/frecuentes \
     LLAMA_CACHE=/modelos/llama \
     LLM_GGUF=Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M \
     LLM_CTX=2048 \
