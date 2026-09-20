@@ -9,6 +9,14 @@ Una imagen, dos modos según haya o no `LLM_API_KEY`:
 
 En ambos, FastAPI sirve el visor, la voz y los visemas.
 
+> [!WARNING]
+> **Esta imagen nunca se ha construido.** Se escribió en una máquina sin Docker,
+> así que el `Dockerfile` está sin verificar: lo único comprobado es que las
+> dependencias resuelven para `linux/amd64` con `torch==2.14.0+cpu` y sin
+> paquetes de NVIDIA. Da por hecho que el primer `docker build` va a fallar en
+> algo y reserva tiempo para ello. Los puntos más frágiles son la compilación de
+> `llama-server` y que `assets/gabriela.glb` exista antes de construir.
+
 ## Antes de construir
 
 Dos archivos no están en el repositorio y el build los necesita:
@@ -122,6 +130,10 @@ misma pregunta:
 | Por frases, `nfe_step=8` | 30 s | 8 s | 55 s |
 | + respuestas de dos frases | **18-26 s** | **9-17 s** | **48 s** |
 
+La última fila es con `F5_NFE_STEP=8`; **el valor por defecto es 16**, y con él
+la primera palabra tarda alrededor del doble. Está sin bajar a propósito: nadie
+ha comparado todavía las dos calidades de oído.
+
 Tres cambios acumulados: hablar por frases en vez de esperar la respuesta
 entera, ocho pasos de difusión en vez de dieciséis, y un tope de 90 tokens con
 la persona ordenando brevedad. Ese último bajó la media de 2-4 bloques por
@@ -136,8 +148,9 @@ lentos por núcleo, así que en el nodo hay que contar bastante más. Lo único 
 queda por probar es **una GPU que sirva** (ver abajo): es lo único que cierra el
 silencio de verdad.
 
-Pásame la salida de `lscpu` del nodo y afino estos números; la parte del Xeon es
-extrapolación, no medida.
+Estos números salen de un M2; la parte del Xeon es **extrapolación, no medida**.
+Para afinarlos hace falta la salida de `lscpu` del nodo y una medición real
+contra el contenedor ya desplegado.
 
 ### El arranque también cuenta
 

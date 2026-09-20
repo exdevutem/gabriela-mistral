@@ -180,11 +180,10 @@ ejecutaba el viejo. Resuelto con `Cache-Control: no-store`.
 veía. Los vértices que miran hacia atrás muestrean la cara por el otro lado. Para una
 conversación cara a cara alcanza; si se quiere permitir orbitar el modelo, se rompe.
 
-**La latencia la marca el TTS.** Sigue siendo el cuello de botella, ahora contra la
-CPU local en vez de la red, y ahora es **el problema abierto del proyecto**. El
-texto llega de Groq en menos de un segundo; la síntesis tarda 4-5 veces el
-tiempo del audio que produce. Medido end-to-end: 70 s para una respuesta de 15 s
-de voz, 149 s para otra de 16,6 s. En los Xeon del cluster será peor.
+**La latencia la marca el TTS**, y sigue siendo **el problema abierto del
+proyecto**. El texto llega de Groq en menos de un segundo; la síntesis tarda
+cinco veces el tiempo del audio que produce. En los Xeon del cluster será peor
+que en las cifras de aquí abajo, todas medidas en un M2.
 
 **Se habla por frases.** El servidor trocea la respuesta con el propio
 `chunk_text` de F5 —así cada trozo coincide con lo que el modelo sintetizaría de
@@ -197,6 +196,12 @@ total, sino cuándo empieza a sonar: de 70 s a 30 s.
 | Por frases, `nfe_step=16` | 51 s | 49 s | 120 s |
 | Por frases, `nfe_step=8` | 30 s | 8 s | 55 s |
 | + respuestas de dos frases | **18-26 s** | 9-17 s | **48 s** |
+
+**Ojo con la última fila: es con `F5_NFE_STEP=8`, y el valor por defecto es 16.**
+Se dejó en 16 porque nadie ha comparado aún las dos muestras de oído, y bajar la
+calidad de la voz sin escucharla no es una decisión que deba tomarse sola. Con
+el default, la primera palabra tarda alrededor del doble. Decidirlo es de lo
+primero que hay que hacer al retomar.
 
 El silencio entre frases es irreducible mientras la síntesis tarde más que el
 audio que produce: la voz nunca alcanza a la reproducción. Con 8 pasos son 8 s,
@@ -243,13 +248,19 @@ lo que debería.
 
 En orden de rendimiento por esfuerzo.
 
-**1. Voz a voz con micrófono.** whisper.cpp del lado de la escucha cierra el círculo
-sin salir de local: elimina el teclado y hace la interacción presencial. Es el paso
-que más cambia la experiencia.
+**0. Decidir `F5_NFE_STEP` escuchando.** Hay muestras con 8 y con 16 pasos. Si 8
+suena aceptable, el default baja a 8 y la espera se parte por la mitad sin tocar
+una línea de código. Cuesta cinco minutos y es lo que más mejora la demostración.
 
-**2. Acortar las respuestas.** Ya se habla por frases; lo que queda es que haya
-menos que decir. `max_tokens` a 90 y un prompt más severo: la mitad de audio es
-la mitad de espera.
+**1. Voz a voz con micrófono.** Elimina el teclado y hace la interacción
+presencial: es el paso que más cambia la experiencia. Dos caminos, y conviene
+medir antes de elegir: whisper.cpp en local, que no depende de la red, o
+`whisper-large-v3-turbo` en Groq, que ya está en el nivel gratuito de la misma
+clave que usa el chat.
+
+**2. Construir y probar la imagen Docker.** Está escrita pero **nunca se ha
+construido**: no había Docker en la máquina de desarrollo. Antes de contar con
+ella hay que levantarla una vez y ver que arranca.
 
 **3. Parpadeo.** Falta el único gesto involuntario que el modelo no tiene, y es de los
 que más separan un rostro vivo de una máscara. FLAME lo permite con un morph target
