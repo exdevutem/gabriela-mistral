@@ -90,7 +90,7 @@ Variables que conviene fijar en el contenedor:
 | `LLM_API_KEY` | vacío | Clave del proveedor. Vacía = modelo local. |
 | `LLM_MODEL` | `qwen/qwen3.8-27b` | Groq retira modelos cada pocos meses. |
 | `LLM_URL` | Groq | Otro proveedor compatible con OpenAI. |
-| `NEUTTS_DEVICE` | `cpu` | No lo cambies sin GPU (ver abajo). |
+| `NEUTTS_DEVICE` | `cpu` en la imagen, `auto` fuera | `auto` elige mps si lo hay. |
 | `NEUTTS_RMS` | `0.09` | Volumen de salida. Súbelo si la sala es ruidosa. |
 | `HF_TOKEN` | vacío | **Obligatorio**: la voz vive en repos *gated*. |
 | `LLM_CTX` | `2048` | Contexto del LLM. Subirlo cuesta RAM. |

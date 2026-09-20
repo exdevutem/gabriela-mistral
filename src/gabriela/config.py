@@ -49,9 +49,13 @@ MULETILLAS = [
 ]
 
 # El mundo físico necesita perillas.
-# CPU a propósito, también en Apple Silicon: no se ha medido que MPS gane aquí,
-# y con F5 la caída era silenciosa.
-DEVICE = os.getenv("NEUTTS_DEVICE", "cpu")
+# "auto" = mps si la máquina lo tiene, cpu si no. Se resuelve en voice.py, que
+# es donde torch ya está cargado. Medido en un M2 el 20 de septiembre de 2026,
+# tras calentar: RTF 1,08 en mps contra 1,37 en cpu, y la referencia se codifica
+# en 1,4 s en vez de 11,0 s. A cambio, arrancar cuesta 35 s más.
+# F5-TTS moría sin traza en mps; NeuTTS aguantó 27 síntesis seguidas y tres
+# conversaciones enteras por WebSocket, que es donde sintetiza en otro hilo.
+DEVICE = os.getenv("NEUTTS_DEVICE", "auto")
 # NeuTTS no tiene perilla de velocidad como la tenía F5 (`speed=0.9`). El ritmo
 # sale del audio de referencia: si habla apurada, la referencia es lo que hay
 # que cambiar.

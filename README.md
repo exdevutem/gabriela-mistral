@@ -202,10 +202,12 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   desbloquea con 1 ms de silencio al enviar la pregunta. Por eso `avatar.js`
   tiene un `audio` único en vez de crear uno por frase: no es un detalle de
   estilo, es lo que hace que suene en Safari.
-- **`NEUTTS_DEVICE` es `cpu` por defecto, también en Apple Silicon.** Es
-  herencia de F5-TTS, que moría sin traza en MPS con respuestas de más de un
-  bloque; con NeuTTS **no se ha medido** si MPS gana ni si se cae. Perilla
-  pendiente de probar.
+- **`NEUTTS_DEVICE` es `auto`**: MPS si la máquina lo tiene, CPU si no. En un
+  M2, tras calentar, MPS da un factor de tiempo real de 1,08 contra 1,37 en CPU
+  y codifica la referencia en 1,4 s en vez de 11,0 s, a cambio de 35 s más de
+  arranque. F5-TTS moría sin traza en MPS; NeuTTS aguantó 27 síntesis seguidas
+  y tres conversaciones enteras por WebSocket —que es donde sintetiza desde
+  otro hilo—, sin un solo fallo. La imagen de Docker lo fija en `cpu`.
 - Medido en un M2 con la CPU (20 de septiembre de 2026): la síntesis tarda
   **1,45 veces el tiempo del audio** que produce —con F5-TTS eran 4,08—, así que
   todo lo que acorta la respuesta sigue acortando la espera. Una respuesta de

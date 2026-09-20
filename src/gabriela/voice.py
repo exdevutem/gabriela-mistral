@@ -5,13 +5,15 @@ La voz sale del par `assets/voz/referencia.wav` + `referencia.txt` (unos 10 s de
 habla y su transcripción exacta). Cambiar esos dos archivos cambia la voz de
 Gabriela.
 
-Medido en un M2 de 8 GB, con la misma referencia y las mismas frases:
+Medido en un M2 de 8 GB, con la misma referencia y las mismas frases, todo
+tras calentar:
 
-| frase                   | audio  | F5-TTS | NeuTTS |
-|-------------------------|--------|--------|--------|
-| «Déjame pensar.»        |  1,2 s | 10,7 s |  4,4 s |
-| «Mmm. Espera un momento.»| 1,9 s | 13,7 s |  4,6 s |
-| una respuesta de 10 s   | 10,2 s | 30,0 s | 13,1 s |
+| frase                    | F5-TTS | NeuTTS cpu | NeuTTS mps |
+|--------------------------|--------|------------|------------|
+| «Déjame pensar.»         | 10,7 s |      4,0 s |      2,5 s |
+| «Mmm. Espera un momento.»| 13,7 s |      4,3 s |      2,9 s |
+| una respuesta de ~9 s    | 30,0 s |     12,5 s |      9,1 s |
+| factor de tiempo real    |   4,08 |       1,37 |       1,08 |
 
 Sigue sin ser tiempo real: las muletillas hacen falta igual.
 """
@@ -64,6 +66,19 @@ def _usar_espeak_del_sistema() -> None:
     )
 
 
+def _device() -> str:
+    """Resuelve DEVICE="auto" a lo que esta máquina tenga.
+
+    Aquí y no en config.py porque importar torch cuesta segundos y config lo
+    carga todo el mundo, tests incluidos.
+    """
+    if DEVICE != "auto":
+        return DEVICE
+    import torch
+
+    return "mps" if torch.backends.mps.is_available() else "cpu"
+
+
 @lru_cache(maxsize=1)
 def precargar():
     """Carga perezosa: son ~1,5 GB de pesos y tarda en arrancar (10,6 s medidos
@@ -76,11 +91,12 @@ def precargar():
 
     _usar_espeak_del_sistema()
 
+    device = _device()
     return NeuTTS(
         backbone_repo=NEUTTS_REPO,
         codec_repo=NEUTTS_CODEC,
-        backbone_device=DEVICE,
-        codec_device=DEVICE,
+        backbone_device=device,
+        codec_device=device,
         language="es",
         seed=SEED,
     )
