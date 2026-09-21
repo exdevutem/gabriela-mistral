@@ -38,6 +38,8 @@ Dos archivos no están en el repositorio y el build los necesita:
 
 ## Construir y publicar
 
+Lo normal es dejárselo a GitHub Actions (abajo). A mano:
+
 ```bash
 docker build --platform linux/amd64 -t ghcr.io/exdevutem/gabriela-mistral:0.1.0 .
 docker push ghcr.io/exdevutem/gabriela-mistral:0.1.0
@@ -52,6 +54,44 @@ LLAMA_TAG=bXXXX` para no depender de `master`.
 instrucciones del runner que construye la imagen —AVX-512 en cualquier CI
 moderno— y el binario muere con `SIGILL` en los Xeon del cluster, que son más
 viejos. Apagado, llama.cpp detecta las extensiones al arrancar.
+
+### Desde GitHub Actions
+
+`.github/workflows/imagen-docker.yml` hace el build y lo empuja a
+`ghcr.io/exdevutem/gabriela-mistral` con el `GITHUB_TOKEN`, sin credenciales que
+mantener. Corre de dos maneras:
+
+- **Al empujar una etiqueta `v*`.** `git tag v0.1.0 && git push origin v0.1.0`
+  publica `0.1.0`, `0.1` y `latest`.
+- **A mano**, desde la pestaña *Actions*. Ahí se puede fijar el tag de
+  llama.cpp, poner una etiqueta extra, o desmarcar *publicar* para sólo probar
+  que el build pasa —que es lo que conviene hacer la primera vez, porque la
+  imagen todavía no se ha construido nunca.
+
+No corre en cada push: el stage de llama.cpp y la instalación de torch se van a
+media hora larga, y el resultado sólo interesa cuando se va a desplegar.
+
+**Hay que darle el busto.** `assets/gabriela.glb` no está en el repositorio y el
+runner no puede generarlo: FLAME exige registro manual. Sin él, el workflow se
+detiene en el primer paso con un mensaje que lo dice. Dos formas de
+entregárselo, y se miran en este orden:
+
+1. El secreto **`GABRIELA_GLB_URL`**, un enlace directo de descarga (el que
+   responda con el binario, no con una página intermedia).
+2. Un adjunto llamado **`gabriela.glb`** en una release del repositorio. La
+   variable **`GABRIELA_GLB_RELEASE`** elige cuál; si está vacía se usa la
+   última. Ojo con que el repositorio es público: un adjunto ahí es publicar el
+   derivado de FLAME por separado, no sólo dentro de la imagen.
+
+Junto a la imagen aparecerá una etiqueta **`buildcache`** en el paquete: es la
+caché de capas del build, que se guarda en el registro y no en la de Actions
+—sólo el stage de llama.cpp no cabe en los 10 GB por repositorio que da Actions—.
+No se despliega, pero no la borres o el siguiente build recompila todo.
+
+La primera vez, la imagen se sube como **privada**. Para que el nodo pueda
+bajarla sin credenciales hay que marcarla pública en la página del paquete
+(*Package settings → Change visibility*), o darle al contenedor un token de
+lectura.
 
 ## Probar en local antes de subirlo
 

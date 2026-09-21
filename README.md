@@ -97,8 +97,10 @@ pregunta con el usuario mirando un «pensando» eterno.
 
 Hay un `Dockerfile` con las dos mitades en una imagen, pensado para publicarla en
 `ghcr.io` y levantarla como contenedor en Proxmox. El build necesita el `.glb` ya
-generado y la voz de referencia se monta en vez de hornearse. Requisitos, flujo,
-y cuánta RAM y CPU pedirle al nodo: [`docker/README.md`](docker/README.md).
+generado y la voz de referencia se monta en vez de hornearse. De construirla y
+subirla se encarga GitHub Actions al empujar una etiqueta `v*`, o a mano desde la
+pestaña *Actions*. Requisitos, flujo, y cuánta RAM y CPU pedirle al nodo:
+[`docker/README.md`](docker/README.md).
 
 La versión corta: **6 GB de RAM y 8 vCPU** usando Groq para el texto (8 GB si
 levantas el modelo local). La latencia de la voz es el problema pendiente: más
