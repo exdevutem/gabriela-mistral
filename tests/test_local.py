@@ -199,8 +199,9 @@ def test_una_frecuente_a_medias_no_se_ofrece():
 
 
 def test_muletillas_se_leen_y_no_se_regraban():
-    # Si grabar_muletillas() no respetara lo ya grabado, cada arranque del
-    # contenedor costaría una síntesis por frase de más.
+    # Si grabar_muletillas() no respetara lo ya grabado y revisado, cada
+    # arranque del contenedor costaría una síntesis por frase de más.
+    import json
     import tempfile
     import wave as W
 
@@ -223,7 +224,13 @@ def test_muletillas_se_leen_y_no_se_regraban():
             assert len(leidas) == len(voz.MULETILLAS), leidas
             primera = voz.trozos(voz.MULETILLAS[0])
             assert [f for f, _ in leidas[0]] == primera, "cada trozo con su frase"
-            assert voz.grabar_muletillas() == 0, "no debe regrabar lo que ya existe"
+            # Con su nota puesta, como quedan tras un arranque normal: lo que
+            # ya se revisó no se vuelve ni a puntuar ni a grabar. Sin ella se
+            # rehacen, que es lo que arregla las tomas viejas malas (hay otro
+            # test para eso).
+            (d / voz.NOTAS).write_text(json.dumps(
+                {r.name: 0.9 for r in d.glob("*.wav")}))
+            assert voz.grabar_muletillas() == 0, "no debe regrabar lo ya revisado"
         finally:
             voz.MULETILLAS_DIR = original
             voz.muletillas.cache_clear()
@@ -251,6 +258,138 @@ def test_una_muletilla_a_medias_no_se_usa():
         finally:
             voz.MULETILLAS_DIR = original
             voz.muletillas.cache_clear()
+
+
+# --- Calidad de lo pre-grabado ---
+#
+# Lo que se prueba aquí es el juez, no el modelo: que sepa distinguir una toma
+# con su voz de una con voz de hombre, y una frase entera de una cortada. Si el
+# juez se equivoca, o se rechaza para siempre audio que estaba bien, o se dan
+# por buenas las tomas que el visitante oye mal.
+
+
+def _habla(f0, segundos=2.0, semilla=0):
+    """Algo que se parece a una voz a f0 hercios: armónicos que caen, un poco
+    de vibrato y algo de ruido. Devuelve PCM como el que produce sintetizar().
+    """
+    rng = np.random.default_rng(semilla)
+    t = np.arange(int(segundos * 24_000)) / 24_000
+    fase = 2 * np.pi * np.cumsum(f0 * (1 + 0.01 * np.sin(2 * np.pi * 3 * t))) / 24_000
+    x = sum(np.sin(k * fase) / k for k in range(1, 25))
+    x = x * (1 + 0.3 * np.sin(2 * np.pi * 2 * t)) + 0.02 * rng.standard_normal(len(t))
+    return (x / np.abs(x).max() * 0.5 * 32767).astype("<i2").tobytes()
+
+
+def test_el_tono_no_se_equivoca_de_octava():
+    # Es el error clásico de medir un período, y aquí saldría caro: contestar
+    # la mitad convertiría su voz en la de un hombre y se rechazarían tomas
+    # buenas para siempre.
+    from gabriela.voice import _tono
+
+    for f0 in (98, 110, 150, 196, 220, 260, 330):
+        medido = _tono(np.frombuffer(_habla(f0), dtype="<i2").astype(np.float32) / 32768)
+        assert abs(medido - f0) / f0 < 0.05, f"{f0} Hz medidos como {medido:.1f}"
+
+
+def test_el_silencio_no_tiene_tono():
+    # Una toma muda puntuaría lo que fuera si esto contestara un número.
+    from gabriela.voice import _tono
+
+    assert _tono(np.zeros(24_000, np.float32)) == 0.0
+
+
+def test_la_voz_de_hombre_no_pasa_y_la_suya_si():
+    # El fallo que se vio en el museo: un badge contestado por otra persona.
+    import gabriela.voice as voz
+
+    texto = "a" * 26  # 26 caracteres a 13 por segundo: dos segundos de audio
+    real, voz._tono_referencia = voz._tono_referencia, lambda: 210.0
+    try:
+        assert voz._puntuar(_habla(205), texto) > 0.9, "es ella"
+        assert voz._puntuar(_habla(228), texto) > 0.6, "también es ella, otro día"
+        assert voz._puntuar(_habla(110), texto) < 0.1, "eso es un hombre"
+    finally:
+        voz._tono_referencia = real
+
+
+def test_la_frase_cortada_y_la_divagacion_no_pasan():
+    # Las otras dos formas de salir mal: el modelo se calla a media palabra o
+    # sigue hablando después de terminar.
+    import gabriela.voice as voz
+
+    texto = "a" * 26
+    real, voz._tono_referencia = voz._tono_referencia, lambda: 210.0
+    try:
+        assert voz._puntuar(_habla(210, 2.4), texto) > 0.6, "un 20% de más es normal"
+        assert voz._puntuar(_habla(210, 1.0), texto) < 0.3, "se cortó a la mitad"
+        assert voz._puntuar(_habla(210, 5.0), texto) < 0.3, "siguió divagando"
+        assert voz._puntuar(b"", texto) == 0.0, "no hay audio"
+    finally:
+        voz._tono_referencia = real
+
+
+def test_se_repite_la_frase_hasta_que_sale_bien():
+    # El trato entero: en lo grabado se paga en tiempo lo que en vivo se paga
+    # en suerte. Y se para en cuanto sale bien, o el arranque se iría al doble.
+    import gabriela.voice as voz
+
+    tomas = [_habla(110), _habla(110), _habla(210)]  # dos malas y una buena
+    semillas = []
+
+    def falso(texto, temperatura=None, semilla=None):
+        semillas.append(semilla)
+        return tomas[len(semillas) - 1]
+
+    real_s, voz.sintetizar = voz.sintetizar, falso
+    real_t, voz._tono_referencia = voz._tono_referencia, lambda: 210.0
+    try:
+        pcm, nota = voz._mejor_toma("a" * 26)
+        assert pcm == tomas[2], "se quedó con una toma mala"
+        assert nota > 0.6, nota
+        assert len(semillas) == 3, f"debió parar en la buena, hizo {len(semillas)}"
+        assert len(set(semillas)) == 3, f"semillas repetidas: {semillas}"
+    finally:
+        voz.sintetizar, voz._tono_referencia = real_s, real_t
+
+
+def test_lo_que_sonaba_mal_se_rehace_y_lo_bueno_se_deja():
+    # Lo grabado vive en un volumen que sobrevive al despliegue, así que las
+    # tomas malas de antes hay que arreglarlas sin que nadie entre a borrar.
+    import json
+    import tempfile
+
+    import gabriela.voice as voz
+
+    texto = "Cada frase es un archivo. Esta es la segunda."
+    frases = voz.trozos(texto)
+    assert len(frases) == 2, frases
+
+    hechas = []
+
+    def falso(t, temperatura=None, semilla=None):
+        hechas.append(t)
+        return _habla(210, len(t) / 13)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        real_s, voz.sintetizar = voz.sintetizar, falso
+        real_t, voz._tono_referencia = voz._tono_referencia, lambda: 210.0
+        try:
+            # La primera ya está y suena a hombre; la segunda ya está y está bien.
+            (d / "0-0.wav").write_bytes(voz.a_wav(_habla(110, len(frases[0]) / 13)))
+            (d / "0-1.wav").write_bytes(voz.a_wav(_habla(210, len(frases[1]) / 13)))
+
+            assert voz._grabar(d, [texto]) == 1, "sólo debía rehacerse la mala"
+            assert hechas == [frases[0]], hechas
+            notas = json.loads((d / "notas.json").read_text())
+            assert set(notas) == {"0-0.wav", "0-1.wav"}, notas
+            assert min(notas.values()) > 0.6, notas
+
+            # Con las notas puestas, un segundo arranque no vuelve a puntuar.
+            hechas.clear()
+            assert voz._grabar(d, [texto]) == 0 and not hechas, hechas
+        finally:
+            voz.sintetizar, voz._tono_referencia = real_s, real_t
 
 
 if __name__ == "__main__":

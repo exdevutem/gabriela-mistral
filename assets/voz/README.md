@@ -50,6 +50,18 @@ Grabarlas la primera vez son 174 s más, una sola vez.
 NeuTTS habla más pausado que F5 en frases cortas —la misma muletilla le dura el
 doble— y no tiene perilla de velocidad: el ritmo sale de la referencia.
 
+## La referencia también es la vara de medir
+
+Del `referencia.wav` sale además el **tono** contra el que se juzga cada frase
+grabada: su fundamental mediana. Una toma que se aleje mucho de ella no es ella
+—es el modelo que se fue a otro hablante, y suele sonar a hombre— y se repite
+con otra semilla hasta que salga bien. Por eso, si cambias la referencia, la
+vara cambia con ella y lo grabado con la voz anterior deja de cuadrar: **borra
+`muletillas/` y `frecuentes/` enteras**, `notas.json` incluido.
+
+Si el `.wav` no es PCM de 16 bits no se puede medir, y entonces las tomas se
+juzgan sólo por su duración: queda dicho en el log al arrancar.
+
 ## Muletillas
 
 `muletillas/` es lo que dice mientras piensa, para que la espera no empiece en
@@ -62,6 +74,12 @@ Se guarda **un archivo por frase** (`0-0.wav`, `0-1.wav`, …) porque el servido
 las manda troceadas: el visor descarta las que no alcanzaron a sonar en cuanto
 llega la respuesta. Por eso el largo no se paga. Una muletilla a la que le
 falte un trozo no se usa: se cortaría a mitad de la historia.
+
+Junto a los `.wav` queda un `notas.json` con lo que puntuó cada uno, de 0 a 1.
+Sirve para no revisar en cada arranque lo ya revisado y para no insistir sin fin
+con una frase que sale mal; bórralo y todo se revisa otra vez. Si alguna frase
+tiene una nota baja, óyela: el modelo no fue capaz de decirla bien ni en seis
+intentos y probablemente haya que reescribirla más corta o más simple.
 
 **Las frases tienen que ser cortas**, bajo `MAX_BYTES_MULETILLA` (70 bytes, unos
 5 s). El visor deja terminar la frase que está sonando, así que ésa es la espera

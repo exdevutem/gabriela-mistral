@@ -208,7 +208,7 @@ los 14,8-20,2 s**. Con F5-TTS eran 25-31 s y 35-42 s.
 | Por frases + respuestas cortas, `nfe_step=16` | 47-54 s | 31-34 s | 96-101 s |
 | **Lo mismo con `nfe_step=8`** (actual) | **25-31 s** | ninguno | **35-42 s** |
 
-**`nfe_step` está en 8, y la medición decía 16.** Vale la pena dejar escrito el
+**`nfe_step` acabó en 8, y la medición decía 16.** Vale la pena dejar escrito el
 desacuerdo. Generando la misma frase con la misma semilla y comparando contra
 `nfe=64`:
 
@@ -246,6 +246,39 @@ que se colgó.
 Las otras perillas, todas medidas: acortar la referencia de 11,8 s a 7,6 s
 ahorra un 26 % —F5-TTS genera la referencia y la frase juntas, así que su largo
 se paga en cada síntesis—, y `max_tokens` acorta la respuesta.
+
+**Lo grabado se puede permitir lo que lo hablado no.** NeuTTS no tiene una
+perilla equivalente a `nfe_step`: genera en un paso autorregresivo, y no falla
+por configuración sino por muestreo. Con la misma frase y distinta semilla, una
+toma sale con su voz y otra sale con voz de hombre, divagando o cortada a media
+palabra —el modo de fallar de cualquier modelo que clona a partir de una
+referencia—. En vivo hay que quedarse con la primera toma. Las muletillas y las
+respuestas frecuentes no: nadie está esperando, se graban una sola vez y viven
+en disco.
+
+Así que ahí se compra calidad con tiempo, que es lo que `nfe_step` compraba:
+cada frase se sintetiza hasta seis veces, con semilla distinta y algo más fría
+(temperatura 0,7 en vez de 1,0), y se guarda la mejor. Para en cuanto una toma
+es lo bastante buena, así que las que salen bien a la primera —la mayoría—
+siguen costando una.
+
+Elegir «la mejor» sin oírla se hace con dos medidas, y sólo dos, porque son las
+que delatan las tomas malas que se vieron:
+
+- **El tono.** Se compara la fundamental mediana de la toma con la de
+  `referencia.wav`, en semitonos. Tres semitonos siguen siendo ella; doce es
+  otra persona. Es lo que caza la voz de hombre.
+- **El largo.** A trece caracteres por segundo se sabe cuánto debería durar el
+  texto. La mitad es una frase cortada; el doble es el modelo divagando.
+
+Lo que esto **no** caza es una toma que diga otra cosa con su voz y en el tiempo
+justo; para eso haría falta un reconocedor. La nota de cada archivo queda en un
+`notas.json` al lado, que sirve para dos cosas: no volver a revisar en cada
+arranque lo ya revisado, y que una frase que sale mal las seis veces no se
+repita eternamente —se queda la menos mala, con un aviso en el log para que
+alguien la oiga y la reescriba—. Un archivo sin nota es de antes de que esto
+existiera: se puntúa una vez y se rehace sólo si está mal, que es como se
+arreglan solas las tomas viejas que ya están en el volumen del museo.
 
 **Mientras espera, habla.** Treinta segundos de busto inmóvil no se leen como
 "está pensando" sino como "se colgó". Dos cosas lo tapan: una muletilla grabada

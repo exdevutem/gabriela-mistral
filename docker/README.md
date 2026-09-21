@@ -157,6 +157,13 @@ negocia contra latencia. Lo que sí se hereda es que trozos más largos rinden
 mejor (RTF 1,29 en una frase de 10 s contra 1,79 en una de 2 s), así que el tope
 de `MAX_BYTES` en `voice.py` cambia latencia inicial por rendimiento total.
 
+Donde sí se puede comprar calidad con tiempo es en lo **pre-grabado**, porque
+ahí nadie espera: cada frase de las muletillas y de las respuestas frecuentes se
+sintetiza hasta `NEUTTS_INTENTOS` veces con semilla distinta y se guarda la
+mejor (`NEUTTS_ACEPTABLE` decide cuándo parar). Eso alarga el primer arranque
+—ver abajo— y no toca la latencia de una respuesta en vivo, que sigue siendo de
+una sola toma.
+
 Tres cambios acumulados: hablar por frases en vez de esperar la respuesta
 entera, ocho pasos de difusión en vez de dieciséis, y un tope de 90 tokens con
 la persona ordenando brevedad. Ese último bajó la media de 2-4 bloques por
@@ -179,13 +186,23 @@ contra el contenedor ya desplegado.
 
 El contenedor tarda unos **40 s en aceptar visitas**, y el **primer** arranque
 sobre un `/modelos` vacío unos 9 minutos, porque además graba las 24 frases de
-muletilla y las 68 de las respuestas frecuentes.
+muletilla y las 68 de las respuestas frecuentes. Súmale lo que cueste repetir
+las que salgan mal: cada repetición es otra síntesis de esa frase, y el tope son
+`NEUTTS_INTENTOS` (6). El peor caso teórico es seis veces 9 minutos; lo normal
+es bastante menos, porque sólo se repiten las frases que fallan.
 Ese calentamiento no es opcional —sin él, la primera respuesta costaba **390 s**
 en lugar de 51— así que no lo quites para que el arranque parezca más rápido.
 
 Las muletillas se guardan en `/modelos/muletillas`: es otra razón para que ese
 volumen sea persistente. Si cambias la voz de referencia, **bórralas**, o
 Gabriela seguirá titubeando con la voz vieja.
+
+En ese volumen, junto a los `.wav`, queda un `notas.json` con lo que puntuó cada
+frase. Gracias a él los arranques siguientes no vuelven a revisar lo ya
+revisado; borrándolo (sin borrar los `.wav`) se fuerza una revisión completa, y
+se rehace sólo lo que esté mal. Los archivos grabados antes de que esto
+existiera no tienen nota: el primer arranque con esta versión los revisa y
+arregla los que suenen mal, sin que nadie entre a borrar nada.
 
 ### La GTX 750 del `pve0-exdev` no sirve para esto
 

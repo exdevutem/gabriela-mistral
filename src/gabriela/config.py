@@ -214,3 +214,32 @@ TEMPERATURA = float(os.getenv("NEUTTS_TEMPERATURA", "1.0"))
 RMS_OBJETIVO = float(os.getenv("NEUTTS_RMS", "0.09"))
 # Semilla fija: la voz sale igual en cada ejecución.
 SEED = int(os.getenv("NEUTTS_SEED", "0"))
+
+# --- Calidad de lo pre-grabado ---
+# F5-TTS tenía `nfe_step`: subirlo compraba calidad con tiempo, y estaba en 8
+# porque en vivo el tiempo era lo que faltaba. NeuTTS no tiene esa perilla —no
+# hay pasos de difusión que subir, genera en un paso autorregresivo— así que no
+# es cosa de cambiarle el número.
+#
+# Lo que sí varía es la suerte del muestreo. Con la misma frase y distinta
+# semilla, una toma sale con su voz y otra sale con voz de hombre, o divagando,
+# o cortada a media palabra: es el modo de fallar de un modelo autorregresivo
+# que clona a partir de una referencia. En vivo hay que quedarse con la primera
+# toma. Lo grabado no: nadie está esperando, así que se sintetiza varias veces
+# y se guarda la mejor. Ese es el reemplazo honesto de `nfe_step` —comprar
+# calidad con tiempo— y se paga una sola vez, porque queda en disco.
+#
+# Cuántas tomas como máximo por frase. Se para en cuanto una es lo bastante
+# buena, así que las frases que salen bien a la primera —la mayoría— siguen
+# costando una. Ver `_mejor_toma` en voice.py.
+GRABADO_INTENTOS = int(os.getenv("NEUTTS_INTENTOS", "6"))
+# Nota mínima para dar una toma por buena, de 0 a 1. Ver `_puntuar`: 1,0 es
+# exactamente el tono de la referencia y exactamente el largo que le toca al
+# texto. Subirlo hace que se repitan más frases y el arranque tarde más; por
+# debajo de 0,5 ya deja pasar una voz que no es la suya.
+GRABADO_ACEPTABLE = float(os.getenv("NEUTTS_ACEPTABLE", "0.6"))
+# Las tomas grabadas se muestrean más frías que las de en vivo: con menos
+# temperatura el modelo se aparta menos de la referencia, que es de donde salen
+# las voces ajenas. A cambio la entonación es algo más plana, y por eso no se
+# toca la de en vivo —donde además no habría con qué comparar la toma.
+GRABADO_TEMPERATURA = float(os.getenv("NEUTTS_TEMPERATURA_GRABADA", "0.7"))

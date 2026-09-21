@@ -167,10 +167,11 @@ rotar la mandíbula baja la barbilla mientras el cráneo queda quieto.
 
 ```bash
 uv run python tests/test_visemes.py                          # lógica de visemas
-uv run python tests/test_local.py                            # chat y formato de audio
+uv run python tests/test_local.py                            # chat, audio y calidad de tomas
 uv run python pipeline/landmarks.py assets/fotos/mistral-1946-frontal.jpg
 uv run python -m gabriela.chat "¿Quién eres?"                # solo texto
 uv run python -m gabriela.voice "Hola" --out /tmp/g.wav      # solo voz
+uv run python -m gabriela.voice "Hola" --grabado             # como lo pre-grabado
 uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 ```
 
@@ -239,6 +240,17 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   `assets/voz/muletillas/` y `assets/voz/frecuentes/`, un archivo por frase. Si
   cambias la voz de referencia, el modelo o el device, borra esas carpetas o
   seguirá hablando con la voz vieja.
+- **Lo grabado se repite hasta que sale bien.** NeuTTS falla por muestreo: la
+  misma frase sale con su voz o con voz de hombre según la semilla. En vivo hay
+  que quedarse con lo que salga, pero una frase grabada se sintetiza hasta
+  `NEUTTS_INTENTOS` veces (6) con semilla distinta y se guarda la mejor, medida
+  por tono contra `referencia.wav` y por duración contra el texto. Es lo que
+  reemplaza al `nfe_step` de F5-TTS: comprar calidad con tiempo, sólo que aquí
+  el tiempo se paga una vez y en el arranque, no en cada respuesta.
+  Para en cuanto una toma es buena, así que la mayoría de las frases siguen
+  costando una sola síntesis. La nota de cada archivo queda en un `notas.json`
+  al lado; para que se revise todo otra vez, bórralo. Si una frase no llega en
+  seis intentos, queda la menos mala y el log lo dice: óyela y reescríbela.
 - **Las frases de muletilla tienen que ser cortas** (`MAX_BYTES_MULETILLA`, 70
   bytes ≈ 5 s). El visor descarta el relleno pendiente cuando llega la
   respuesta, pero deja terminar la frase que suena: esa frase es el retraso
