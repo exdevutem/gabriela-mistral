@@ -177,4 +177,8 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 nohup caffeinate -i uv run pipeline/dataset_piper.
 - Se corta y se retoma cuando sea. Medido en el M5, en MPS: unos 20 s por frase.
 
 El entrenamiento no va en el Mac —Piper y MPS no se llevan bien—, sino en una
-GPU gratuita de Colab o Kaggle.
+GPU gratuita de Colab: `pipeline/entrenar_piper.ipynb`
+([abrir en Colab](https://colab.research.google.com/github/exdevutem/gabriela-mistral/blob/dev/pipeline/entrenar_piper.ipynb)).
+Afina desde `es_MX/ald/medium`, guarda los checkpoints en Drive para retomar
+cuando Colab corte, y al final exporta el `.onnx` y mide su factor de tiempo
+real en CPU. Sin probar todavía de punta a punta.
