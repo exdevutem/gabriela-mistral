@@ -154,3 +154,27 @@ y su licencia y autoría deben quedar anotadas aquí antes de publicar el proyec
 como en `assets/fotos/PROCEDENCIA.md`.
 
 > La voz es una recreación sintética, no una grabación de Gabriela Mistral.
+
+## Dataset para una voz propia (Piper)
+
+La voz en vivo es lenta en el clúster. El plan para salir de eso es afinar
+[Piper](https://github.com/rhasspy/piper) —VITS, más rápido que tiempo real en
+CPU— con F5 como maestra: horas de F5 diciendo frases variadas, y Piper aprende
+a imitarla.
+
+`pipeline/dataset_piper.py` arma ese dataset en `dataset/`, en formato
+LJSpeech (`wav/*.wav` a 22 050 Hz y `metadata.csv` con `id|texto`):
+
+```bash
+PYTORCH_ENABLE_MPS_FALLBACK=1 nohup caffeinate -i uv run pipeline/dataset_piper.py --frases 1500 > assets/voz/dataset/grabacion.log 2>&1 &
+```
+
+- Las frases son las de Common Voice en español (CC0), filtradas a las que no
+  tienen números ni siglas: F5 las leería de una forma y Piper aprendería otra.
+- Las frecuentes ya grabadas con F5 entran tal cual, remuestreadas.
+- Cada frase tiene hasta cuatro tomas; si ninguna llega a la nota, se descarta
+  y queda en `descartadas.txt`.
+- Se corta y se retoma cuando sea. Medido en el M5, en MPS: unos 20 s por frase.
+
+El entrenamiento no va en el Mac —Piper y MPS no se llevan bien—, sino en una
+GPU gratuita de Colab o Kaggle.
