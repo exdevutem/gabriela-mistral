@@ -101,6 +101,25 @@ que el modelo recuerde ese día. Además responden en 0,04 s. Sólo se ofrecen c
 badge las que están **completas**: si a una le falta un trozo, la pregunta cae en
 el LLM, que al menos contesta entera.
 
+### Grabarlas con F5-TTS
+
+Las frecuentes suenan solas —ninguna respuesta en vivo las sigue—, así que no
+tienen por qué salir del modelo rápido. `pipeline/grabar_frecuentes_f5.py` las
+graba con F5-TTS a `nfe_step=32`, offline y con hasta diez tomas por frase,
+en una máquina con memoria de sobra (probado en un M5 de 24 GB, en MPS):
+
+```bash
+PYTORCH_ENABLE_MPS_FALLBACK=1 uv run pipeline/grabar_frecuentes_f5.py --out assets/voz/frecuentes-f5
+```
+
+Deja el mismo formato y el mismo `notas.json`, así que el servidor las da por
+revisadas y no las regraba. Óyelas, y si convencen, cámbialas por
+`frecuentes/` y cópialas al volumen del museo. Las **muletillas no**: a ellas
+las sigue la voz de NeuTTS y el cambio de timbre se oiría.
+
+Las frases de una palabra —«Sí.», «No.»— puntúan bajo con cualquier modelo:
+duran un segundo y la nota espera medio. Hay que oírlas, no leer la nota.
+
 ### De dónde salen los datos
 
 Todo lo que dice de este museo está verificado contra dos fuentes:
