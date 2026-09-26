@@ -330,6 +330,16 @@ lo que debería.
 
 En orden de rendimiento por esfuerzo.
 
+**0. Voz propia en Piper (en curso).** Ataca el problema abierto, la latencia
+del TTS: Piper corre más rápido que tiempo real en CPU. Se afina con F5-TTS de
+maestra —`pipeline/dataset_piper.py` genera ~2 h de audio en un M5, y
+`pipeline/entrenar_piper.ipynb` entrena en la T4 gratuita de Colab—. Hecho: el
+dataset, en marcha el 26 de septiembre de 2026. **Sin verificar**: el notebook
+no se ha corrido, y está por oír si la copia suena lo bastante bien. Las
+frecuentes ya se graban con F5 (`pipeline/grabar_frecuentes_f5.py`): la nota media
+subió de 0,78 a 0,91. Ojo con la licencia: la voz de Piper sale del audio de
+F5-Spanish (CC BY-NC 4.0), así que conviene tratarla también como no comercial.
+
 **1. Voz a voz con micrófono.** Elimina el teclado y hace la interacción
 presencial: es el paso que más cambia la experiencia. Dos caminos, y conviene
 medir antes de elegir: whisper.cpp en local, que no depende de la red, o

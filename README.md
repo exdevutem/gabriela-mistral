@@ -281,3 +281,6 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   recupera proporciones, no rasgos finos. Una segunda vista de perfil ayudaría,
   pero no hay ninguna en dominio público con resolución suficiente.
 - Parpadeo, y voz a voz con micrófono (whisper.cpp del lado de la escucha).
+- **Voz propia en Piper**, para bajar la latencia en el clúster: el dataset
+  se genera con F5 en el Mac y el notebook de Colab está escrito, pero aún no
+  se ha entrenado ni oído nada. Ver `assets/voz/README.md`.
