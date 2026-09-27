@@ -334,8 +334,11 @@ En orden de rendimiento por esfuerzo.
 del TTS: Piper corre más rápido que tiempo real en CPU. Se afina con F5-TTS de
 maestra —`pipeline/dataset_piper.py` genera ~2 h de audio en un M5, y
 `pipeline/entrenar_piper.ipynb` entrena en la T4 gratuita de Colab—. Hecho: el
-dataset, en marcha el 26 de septiembre de 2026. **Sin verificar**: el notebook
-no se ha corrido, y está por oír si la copia suena lo bastante bien. Las
+dataset (1.566 frases, 93 min, 26 de septiembre de 2026), el notebook, que ya
+entrena —a ~36 épocas por hora en una T4—, y el motor en `voice.py`
+(`VOZ_MOTOR=piper`), probado con la voz publicada `es_MX-ald-medium`: factor de
+tiempo real 0,022 en la CPU de un M5. **Sin verificar**: cómo suena la voz
+afinada y cuánto rinde en los Xeon del clúster. Las
 frecuentes ya se graban con F5 (`pipeline/grabar_frecuentes_f5.py`): la nota media
 subió de 0,78 a 0,91. Ojo con la licencia: la voz de Piper sale del audio de
 F5-Spanish (CC BY-NC 4.0), así que conviene tratarla también como no comercial.

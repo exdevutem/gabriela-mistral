@@ -392,6 +392,24 @@ def test_lo_que_sonaba_mal_se_rehace_y_lo_bueno_se_deja():
             voz.sintetizar, voz._tono_referencia = real_s, real_t
 
 
+
+def test_piper_sale_a_24_khz_y_entera():
+    # Piper entrega 22 050 Hz y a veces en varios trozos. Todo lo de después
+    # —visor, visemas, lo ya grabado— supone 24 kHz: un trozo perdido o un
+    # remuestreo mal hecho se oye como una voz acelerada o cortada.
+    from types import SimpleNamespace
+
+    import gabriela.voice as voz
+
+    uno = np.sin(np.linspace(0, 300, 22_050)).astype(np.float32) * 0.5
+    trozos = [SimpleNamespace(audio_float_array=uno, sample_rate=22_050)] * 2
+    real, voz._piper = voz._piper, lambda: SimpleNamespace(synthesize=lambda t: trozos)
+    try:
+        x = voz._sintetizar_piper("dos segundos")
+    finally:
+        voz._piper = real
+    assert len(x) == 2 * SAMPLE_RATE, f"{len(x)} muestras en vez de {2 * SAMPLE_RATE}"
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

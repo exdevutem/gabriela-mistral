@@ -24,6 +24,7 @@ einops==0.8.2             # via hyper-connections, local-attention, torch-einops
 einx==0.4.3               # via vector-quantize-pytorch
 fastapi==0.141.1          # via -r /tmp/runtime.in
 filelock==3.32.7          # via blobfile, datasets, huggingface-hub, torch
+flatbuffers==25.12.19     # via onnxruntime
 frozendict==2.4.7         # via einx
 frozenlist==1.8.0         # via aiohttp, aiosignal
 fsspec==2026.6.0          # via datasets, huggingface-hub, torch
@@ -56,16 +57,19 @@ networkx==3.6.1           # via torch
 neucodec==0.0.6           # via neutts
 neutts==1.4.1             # via -r /tmp/runtime.in
 numba==0.67.0             # via librosa
-numpy==2.5.3              # via datasets, einx, librosa, neucodec, neutts, numba, pandas, scikit-learn, scipy, soundfile, soxr, torchtune, transformers, -r /tmp/runtime.in
+numpy==2.5.3              # via datasets, einx, librosa, neucodec, neutts, numba, onnxruntime, pandas, scikit-learn, scipy, soundfile, soxr, torchtune, transformers, -r /tmp/runtime.in
 omegaconf==2.3.1          # via torchtune
-packaging==26.3           # via datasets, huggingface-hub, kagglehub, lazy-loader, pooch, transformers
+onnxruntime==1.30.0       # via piper-tts
+packaging==26.3           # via datasets, huggingface-hub, kagglehub, lazy-loader, onnxruntime, pooch, transformers
 pandas==3.0.6             # via datasets
+pathvalidate==3.3.1       # via piper-tts
 phonemizer==3.4.0         # via neutts
 pillow==12.3.0            # via torchtune
+piper-tts==1.8.0          # via -r /tmp/runtime.in
 platformdirs==4.11.11     # via pooch
 pooch==1.9.0              # via librosa
 propcache==0.5.4          # via aiohttp, yarl
-protobuf==7.36.2          # via kagglesdk
+protobuf==7.36.2          # via kagglesdk, onnxruntime
 psutil==7.2.2             # via torchtune
 pyarrow==25.0.1           # via datasets
 pycparser==3.0            # via cffi
@@ -82,7 +86,7 @@ resemble-perth==1.0.1     # via neutts
 rich==13.9.4              # via typer
 safetensors==0.8.0        # via torchtune, transformers
 scikit-learn==1.9.1       # via librosa
-scipy==1.18.1             # via librosa, scikit-learn
+scipy==1.18.1             # via librosa, scikit-learn, -r /tmp/runtime.in
 sentencepiece==0.2.2      # via torchtune
 setuptools==84.0.0        # via torch
 shellingham==1.5.4        # via typer

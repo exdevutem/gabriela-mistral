@@ -25,6 +25,15 @@ LLM_URL = os.getenv("LLM_URL", "https://api.groq.com/openai/v1/chat/completions"
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")  # vacío para un llama-server local
 
+# --- Voz: qué motor habla en vivo ---
+# "neutts" clona desde la referencia y es lo probado. "piper" es la voz propia,
+# afinada con F5-TTS de maestra (pipeline/entrenar_piper.ipynb): corre más
+# rápido que tiempo real en CPU, que es lo que le falta al clúster. Queda en
+# neutts hasta que la de Piper se haya oído y medido.
+MOTOR = os.getenv("VOZ_MOTOR", "neutts")
+# El .onnx que exporta el notebook; su .onnx.json tiene que estar al lado.
+PIPER_MODELO = Path(os.getenv("PIPER_MODELO", VOZ / "piper" / "es_419-gabriela-medium.onnx"))
+
 # --- Voz: NeuTTS nano-spanish (clonación a partir de un audio de referencia) ---
 # Reemplazó a F5-TTS el 20 de septiembre de 2026: misma voz de referencia, 2,8
 # veces más rápido en el mismo M2 (medido: RTF 4,08 -> 1,45).
@@ -52,7 +61,14 @@ REF_TEXTO = VOZ / "referencia.txt"
 # museo (museodelaeducacion.gob.cl) y contra «Lucila Gabriela: La voz de la
 # Maestra» (MEGM, 2008). Si agregas una, verifica igual: ella no debe decir
 # cosas falsas sobre un museo real, y menos hablando en primera persona.
+#
+# Una carpeta por motor: a las muletillas las sigue la voz en vivo, y si las
+# grabó otro motor el timbre cambia a mitad de respuesta. Así, cambiar de motor
+# graba las suyas en el siguiente arranque en vez de mezclar voces. El sufijo
+# va también sobre MULETILLAS_DIR, que la imagen Docker fija.
 MULETILLAS_DIR = Path(os.getenv("MULETILLAS_DIR", VOZ / "muletillas"))
+if MOTOR != "neutts":
+    MULETILLAS_DIR = MULETILLAS_DIR.with_name(f"{MULETILLAS_DIR.name}-{MOTOR}")
 MULETILLAS = [
     "Mientras busco las palabras, déjame contarte dónde estás. "
     "Este edificio fue la Escuela Normal Número Uno. "

@@ -16,6 +16,9 @@ tras calentar:
 | factor de tiempo real    |   4,08 |       1,37 |       1,08 |
 
 Sigue sin ser tiempo real: las muletillas hacen falta igual.
+
+Con VOZ_MOTOR=piper habla la voz propia afinada en Piper, que sí lo es:
+factor de tiempo real 0,022 en la CPU de un M5.
 """
 from __future__ import annotations
 
@@ -29,9 +32,9 @@ from functools import lru_cache
 import numpy as np
 
 from .config import (DEVICE, FRECUENTES, FRECUENTES_DIR, GRABADO_ACEPTABLE,
-                     GRABADO_INTENTOS, GRABADO_TEMPERATURA, MULETILLAS,
-                     MULETILLAS_DIR, NEUTTS_CODEC, NEUTTS_REPO, REF_AUDIO,
-                     REF_TEXTO, RMS_OBJETIVO, SEED, TEMPERATURA)
+                     GRABADO_INTENTOS, GRABADO_TEMPERATURA, MOTOR, MULETILLAS,
+                     MULETILLAS_DIR, NEUTTS_CODEC, NEUTTS_REPO, PIPER_MODELO,
+                     REF_AUDIO, REF_TEXTO, RMS_OBJETIVO, SEED, TEMPERATURA)
 
 log = logging.getLogger(__name__)
 
@@ -123,6 +126,21 @@ def precargar():
 
 
 @lru_cache(maxsize=1)
+def _piper():
+    """La voz propia en Piper. Son ~60 MB y cargan en menos de un segundo, pero
+    se cachea igual: la sesión de onnxruntime es lo caro de crear.
+    """
+    from piper import PiperVoice
+
+    if not PIPER_MODELO.exists() or not PIPER_MODELO.with_suffix(".onnx.json").exists():
+        raise RuntimeError(
+            f"VOZ_MOTOR=piper pero falta {PIPER_MODELO} o su .onnx.json al lado. "
+            "Los exporta pipeline/entrenar_piper.ipynb."
+        )
+    return PiperVoice.load(str(PIPER_MODELO))
+
+
+@lru_cache(maxsize=1)
 def _referencia() -> tuple[str, str]:
     if not REF_AUDIO.exists() or not REF_TEXTO.exists():
         raise RuntimeError(
@@ -149,7 +167,8 @@ def calentar() -> None:
     en marcha los kernels de torch. Aquí se paga una vez, y de paso se graban
     las muletillas que falten, que sirven de calentamiento.
     """
-    _codigos_referencia()
+    if MOTOR == "neutts":
+        _codigos_referencia()
     if not grabar_muletillas() + grabar_frecuentes():
         sintetizar("Ay.")  # nada que grabar: hay que calentar igual
 
@@ -487,7 +506,34 @@ def sintetizar(texto: str, temperatura: float | None = None,
     lo de siempre. `semilla` pide *otra* toma del mismo texto —con la fija,
     NeuTTS devuelve el mismo audio, el mismo fallo incluido, por muchas veces
     que se le pregunte— y `temperatura` la pide más conservadora.
+
+    Piper no usa ninguno de los dos: su ruido sale distinto en cada llamada,
+    así que repetir la frase ya da otra toma.
     """
+    x = _sintetizar_piper(texto) if MOTOR == "piper" else _sintetizar_neutts(
+        texto, temperatura, semilla)
+    # Ninguno entrega al nivel de F5 y el de NeuTTS varía entre frases; sin
+    # esto la muletilla suena a la mitad de volumen que la respuesta que la sigue.
+    if len(x) and (rms := float(np.sqrt((x**2).mean()))):
+        x = x * (RMS_OBJETIVO / rms)
+    return (x.clip(-1, 1) * 32767).astype("<i2").tobytes()
+
+
+def _sintetizar_piper(texto: str) -> np.ndarray:
+    """A 24 kHz, aunque Piper entregue 22 050: el visor, los visemas y lo ya
+    grabado están todos a 24 kHz, y remuestrear aquí es no tocar nada de eso.
+    """
+    from scipy.signal import resample_poly
+
+    trozos_audio = list(_piper().synthesize(texto))
+    if not trozos_audio:
+        return np.zeros(0, np.float32)
+    x = np.concatenate([t.audio_float_array for t in trozos_audio]).astype(np.float32)
+    return resample_poly(x, SAMPLE_RATE, trozos_audio[0].sample_rate).astype(np.float32)
+
+
+def _sintetizar_neutts(texto: str, temperatura: float | None,
+                       semilla: int | None) -> np.ndarray:
     modelo = precargar()
     _, ref_texto = _referencia()
     # ponytail: NeuTTS sólo acepta la semilla al construirse y la guarda en
@@ -502,12 +548,7 @@ def sintetizar(texto: str, temperatura: float | None = None,
         )
     finally:
         modelo._seed = SEED
-    x = np.asarray(wav, dtype=np.float32)
-    # NeuTTS entrega más bajo que F5 y el nivel varía entre frases; sin esto la
-    # muletilla suena a la mitad de volumen que la respuesta que la sigue.
-    if rms := float(np.sqrt((x**2).mean())):
-        x = x * (RMS_OBJETIVO / rms)
-    return (x.clip(-1, 1) * 32767).astype("<i2").tobytes()
+    return np.asarray(wav, dtype=np.float32)
 
 
 def a_wav(pcm: bytes) -> bytes:

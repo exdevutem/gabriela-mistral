@@ -282,5 +282,6 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   pero no hay ninguna en dominio público con resolución suficiente.
 - Parpadeo, y voz a voz con micrófono (whisper.cpp del lado de la escucha).
 - **Voz propia en Piper**, para bajar la latencia en el clúster: el dataset
-  se genera con F5 en el Mac y el notebook de Colab está escrito, pero aún no
-  se ha entrenado ni oído nada. Ver `assets/voz/README.md`.
+  está hecho (1.566 frases, 93 min), el entrenamiento corre en Colab y el
+  servidor ya la usa con `VOZ_MOTOR=piper`. Falta oír el modelo afinado y
+  medirlo en el clúster. Ver `assets/voz/README.md`.

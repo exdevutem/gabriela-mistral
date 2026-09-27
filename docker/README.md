@@ -136,7 +136,9 @@ Variables que conviene fijar en el contenedor:
 | `LLM_CTX` | `2048` | Contexto del LLM. Subirlo cuesta RAM. |
 | `LLM_THREADS` | todos los núcleos | Hilos de llama.cpp. |
 | `LLM_GGUF` | `Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M` | Otro modelo. |
-| `MULETILLAS_DIR` | `/modelos/muletillas` | Dónde se graba el relleno hablado. |
+| `VOZ_MOTOR` | `neutts` | `piper` usa la voz propia: más rápida que tiempo real en CPU. |
+| `PIPER_MODELO` | `assets/voz/piper/es_419-gabriela-medium.onnx` | Con su `.onnx.json` al lado; entra con el montaje de `assets/voz`. |
+| `MULETILLAS_DIR` | `/modelos/muletillas` | Dónde se graba el relleno hablado. Con otro motor se le suma `-<motor>`. |
 | `FRECUENTES_DIR` | `/modelos/frecuentes` | Dónde se graban las respuestas de los badges. |
 
 ## Cuánta RAM y CPU asignarle

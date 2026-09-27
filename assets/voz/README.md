@@ -182,3 +182,16 @@ GPU gratuita de Colab: `pipeline/entrenar_piper.ipynb`
 Afina desde `es_MX/ald/medium`, guarda los checkpoints en Drive para retomar
 cuando Colab corte, y al final exporta el `.onnx` y mide su factor de tiempo
 real en CPU. Sin probar todavía de punta a punta.
+
+### Usarla
+
+Deja el `.onnx` y su `.onnx.json` que exporta el notebook en `assets/voz/piper/`
+y arranca con `VOZ_MOTOR=piper`. El resto no cambia: sale a 24 kHz como NeuTTS,
+así que visemas, visor y lo ya grabado siguen sirviendo.
+
+- Las muletillas se graban aparte, en `muletillas-piper/`: a ellas las sigue la
+  voz en vivo y no pueden tener otro timbre. Las frecuentes se quedan como
+  están —las grabó F5, que es a quien imita Piper—.
+- Medido en el M5 con la voz publicada `es_MX-ald-medium`, la base del
+  afinado: **factor de tiempo real 0,022 en CPU**, unas 45 veces más rápido que
+  hablar. NeuTTS está entre 1,08 y 1,45. Falta medirlo en el clúster.
