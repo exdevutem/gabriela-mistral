@@ -129,7 +129,8 @@ Variables que conviene fijar en el contenedor:
 
 | Variable | Por defecto | Para qué |
 |---|---|---|
-| `WHISPER_MODELO` | `openai/whisper-small` | `openai/whisper-base` pesa un tercio y se equivoca más. |
+| `WHISPER_MODELO` | `openai/whisper-small` | `openai/whisper-base` pesa un tercio y se equivoca más. `openai/whisper-large-v3-turbo` acierta algo más y en un M5 con mps va a 0,5 s por audio, pero pesa ~1,6 GB y en CPU no está medido. |
+| `WHISPER_DEVICE` | `auto` | `auto` elige mps si lo hay y cpu si no; en el cluster siempre cae en cpu. |
 | `EMBEDDINGS_MODELO` | `paraphrase-multilingual-MiniLM-L12-v2` | El que elige la respuesta. |
 | `UMBRAL` | `0.5` | Parecido mínimo; por debajo dice «no te entendí». |
 | `RESPALDO_DIR` | `/modelos/respaldo` | Dónde se graba el «no te entendí». |

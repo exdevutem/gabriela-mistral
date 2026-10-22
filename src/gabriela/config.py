@@ -252,6 +252,8 @@ if MOTOR != "neutts":
 # visitante hablándole a un micrófono de sala; "base" es tres veces más liviano
 # y se equivoca más con nombres propios.
 WHISPER_MODELO = os.getenv("WHISPER_MODELO", "openai/whisper-small")
+# "auto" = mps si la máquina lo tiene, cpu si no (el cluster no tiene GPU).
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto")
 EMBEDDINGS_MODELO = os.getenv(
     "EMBEDDINGS_MODELO", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 # Parecido mínimo (coseno, de -1 a 1) para darle a una pregunta por reconocida.

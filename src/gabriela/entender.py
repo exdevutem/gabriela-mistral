@@ -27,7 +27,8 @@ from functools import lru_cache
 
 import numpy as np
 
-from .config import EMBEDDINGS_MODELO, FRECUENTES, UMBRAL, VARIANTES, WHISPER_MODELO
+from .config import (EMBEDDINGS_MODELO, FRECUENTES, UMBRAL, VARIANTES,
+                     WHISPER_DEVICE, WHISPER_MODELO)
 
 log = logging.getLogger(__name__)
 
@@ -39,9 +40,13 @@ _turno = threading.Lock()
 
 @lru_cache(maxsize=1)
 def _whisper():
+    import torch
     from transformers import pipeline
 
-    return pipeline("automatic-speech-recognition", model=WHISPER_MODELO, device="cpu")
+    device = WHISPER_DEVICE
+    if device == "auto":
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+    return pipeline("automatic-speech-recognition", model=WHISPER_MODELO, device=device)
 
 
 def transcribir(pcm: bytes) -> str:
