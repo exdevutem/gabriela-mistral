@@ -1,40 +1,44 @@
 # Gabriela Mistral — busto 3D conversacional
 
-Un retrato escultórico en 3D que responde por escrito, habla con voz sintetizada y
-mueve la cara mientras lo hace. Backend en Python, render en el navegador.
+Un retrato escultórico en 3D que contesta preguntas sobre ella y sobre el museo,
+con su voz y moviendo la cara. Backend en Python, render en el navegador.
 
 > Es una recreación con inteligencia artificial, no una grabación ni un testimonio
-> real de Gabriela Mistral (1889–1957). La interfaz lo indica en pantalla, y el
-> prompt le prohíbe inventar versos y atribuírselos.
+> real de Gabriela Mistral (1889–1957). La interfaz lo indica en pantalla.
 
 ## Cómo funciona
 
+**No hay chat.** Ella sólo dice respuestas escritas y verificadas de antemano
+—las preguntas frecuentes de `config.py`—, grabadas con su voz al arrancar. Lo
+que el visitante escribe o le dice al micrófono se compara con esas preguntas y
+suena la respuesta que más se le parezca:
+
 ```
-tu mensaje ──> Gemini o llama.cpp ──> Gemini TTS o NeuTTS ──> PCM 24 kHz
-                                        │
-                        envolvente RMS ─┴─ visemas del texto
-                                        │
-                 {audio, timeline} ──> three.js ──> morph targets
+micrófono ──> Whisper (local) ──┐
+                                ├──> embeddings (local) ──> respuesta grabada
+texto o badge ──────────────────┘          │                  │
+                                    si nada se parece:        │
+                                    «No te entendí bien…»     │
+                                                              ▼
+                        envolvente RMS ─┬─ visemas del texto ─> three.js
 ```
 
-Ella habla por frases: el servidor manda cada una en cuanto la sintetiza, en vez
-de esperar a tener la respuesta entera. Y como una estatua muda se lee como que
-el programa murió, mientras tanto cuenta algo del museo con una **muletilla ya
-grabada** —«Mientras busco las palabras, déjame contarte dónde estás…»— y la
-página dice en qué va: *preparando la voz… 2 de 4*.
-
-Esas muletillas duran unos 20 s y **se oyen enteras**, aunque la respuesta ya
-esté lista: prometen contar algo del museo y cortarlas dejaría la información a
-medias. La respuesta se sintetiza mientras suenan y espera su turno, así que el
-precio es que empieza a oírse al terminar el relleno.
-
-Bajo la caja de texto hay **badges con preguntas frecuentes** —qué fue este
-edificio, quién fue Brígida Walker, si tenía título de maestra—. Esas respuestas
-están **grabadas, no las escribe el modelo**: suenan en 0,04 s, no pasan por el
-LLM y dicen siempre lo mismo. En un museo eso importa más que la variedad: una
-fecha inventada es una fecha que el visitante se lleva a casa. Las preguntas
-frecuentes sí quedan en el historial, así que un «¿y eso por qué?» a
-continuación llega al modelo con contexto.
+- **Whisper** (`openai/whisper-small`) sólo transcribe. Elegir la respuesta lo
+  hace un modelo de embeddings multilingüe
+  (`paraphrase-multilingual-MiniLM-L12-v2`) que compara el sentido de lo dicho
+  con cada pregunta, con su respuesta y con sus `VARIANTES`. Si nada pasa de
+  `UMBRAL` (0,5), dice que no entendió y señala los badges.
+- **Por qué así**: en un museo una fecha inventada es una fecha que el visitante
+  se lleva a casa creyendo que se la dijo ella. Con respuestas grabadas no hay
+  forma de que invente nada, suenan al instante y no hace falta ni red ni
+  clave. Se probó primero con Gemini (texto y voz), pero el nivel gratuito del
+  TTS da 3 peticiones por minuto y 10 al día.
+- **Si contesta otra cosa**: el log muestra qué entendió y qué eligió
+  (`gabriela.entender: «…» -> ¿…? (0.72)`). El arreglo es agregar esa forma
+  de preguntar a `VARIANTES`.
+- **El micrófono** sólo funciona con la página en `localhost` o `https`: el
+  navegador no lo ofrece en `http` desde otra máquina. Sin él quedan el texto y
+  los badges.
 
 El labio-sincronizado combina dos fuentes: los **tiempos** salen de la energía del
 audio real y las **formas de boca** del texto. Los visemas se reparten según
@@ -42,34 +46,18 @@ energía acumulada, no según tiempo, así que las pausas del TTS no desfasan la
 
 ## Requisitos
 
-Por defecto el texto y la voz salen de **Google AI Studio** (API de Gemini), con
-los modelos más baratos: `gemini-3.1-flash-lite` para el chat y
-`gemini-3.8-flash-lite-tts` para la voz. Ambos entran en el nivel gratuito, que no
-pide tarjeta. Sin red, el texto puede venir de un llama.cpp local y la voz de
-NeuTTS (`VOZ_MOTOR=neutts`); el código es el mismo.
+Todo corre en local; no hace falta ninguna clave de API.
 
 - Python 3.13 y [uv](https://docs.astral.sh/uv/)
-- Una clave gratuita de [Google AI Studio](https://aistudio.google.com/apikey)
-- Sólo para el modo local: [llama.cpp](https://github.com/ggml-org/llama.cpp)
-  (`brew install llama.cpp`) con un GGUF instruct, y una voz de referencia en
-  `assets/voz/` para NeuTTS (ver más abajo)
+- Una voz de referencia en `assets/voz/` para NeuTTS (ver más abajo), y en macOS
+  `brew install espeak-ng`
+- ~1,5 GB de disco para Whisper y el modelo de embeddings, que se descargan
+  solos de Hugging Face la primera vez
 
 ```bash
 uv sync
-cp .env.example .env    # y pega tu GEMINI_API_KEY
+cp .env.example .env    # y pega tu HF_TOKEN
 ```
-
-**Ojo con el nivel gratuito**: Google usa lo que se le manda para mejorar sus
-productos, y aquí escriben visitantes de un museo. Los límites por minuto y por
-día no están publicados: se ven en AI Studio con la clave. El primer arranque
-graba ~90 frases (muletillas y frecuentes) y, si topa el límite por minuto,
-espera y sigue; si topa el diario, el siguiente arranque continúa donde quedó.
-
-Gemini TTS **no clona**: habla una voz prefabricada (`GEMINI_VOZ`, por defecto
-Gacrux, «madura») con el estilo que se le pide en `GEMINI_ESTILO`. La voz clonada
-de la referencia sólo suena con `VOZ_MOTOR=neutts` o `piper`. Lo grabado va a
-carpetas con sufijo por motor (`muletillas-gemini`, `frecuentes-gemini`) para no
-mezclar voces.
 
 ### La voz en local (NeuTTS)
 
@@ -94,15 +82,9 @@ el entorno, o la descarga responde 403. Su licencia es la «NeuTTS Open License
 uv run uvicorn gabriela.server:app --port 8000
 ```
 
-Para usar un modelo local en lugar de Gemini, deja `GEMINI_API_KEY` vacía, descomenta
-`LLM_URL` y `LLM_MODEL` en el `.env`, y levanta antes:
-
-```bash
-llama-server -hf Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M --port 8080 -c 4096
-```
-
-Arranca cargando NeuTTS —~1,5 GB, unos segundos—, para no pagarlo en la primera
-pregunta con el usuario mirando un «pensando» eterno.
+El primer arranque graba las respuestas que falten con NeuTTS (unos siete
+minutos si no hay ninguna) y carga Whisper. Los siguientes sólo cargan Whisper:
+si todo está grabado, NeuTTS ni se abre.
 
 - `http://localhost:8000` — la conversación
 - `http://localhost:8000/debug` — un slider por morph target, para afinar visemas
@@ -116,9 +98,10 @@ subirla se encarga GitHub Actions al empujar una etiqueta `v*`, o a mano desde l
 pestaña *Actions*. Requisitos, flujo, y cuánta RAM y CPU pedirle al nodo:
 [`docker/README.md`](docker/README.md).
 
-La versión corta: **6 GB de RAM y 8 vCPU** usando Groq para el texto (8 GB si
-levantas el modelo local). La latencia de la voz es el problema pendiente: más
-de dos minutos por respuesta en el hardware del cluster.
+Sin chat ni síntesis en vivo, la latencia de la voz dejó de ser problema: lo
+que cuesta CPU es Whisper transcribiendo, unos segundos por pregunta hablada.
+Las cifras de RAM de `docker/README.md` se midieron con NeuTTS en vivo y están
+pendientes de re-medir.
 
 ## La cabeza
 
@@ -183,9 +166,9 @@ rotar la mandíbula baja la barbilla mientras el cráneo queda quieto.
 
 ```bash
 uv run python tests/test_visemes.py                          # lógica de visemas
-uv run python tests/test_local.py                            # chat, audio y calidad de tomas
+uv run python tests/test_local.py                            # elector, audio y calidad de tomas
 uv run python pipeline/landmarks.py assets/fotos/mistral-1946-frontal.jpg
-uv run python -m gabriela.chat "¿Quién eres?"                # solo texto
+uv run python -m gabriela.entender "dónde naciste" "hola"    # qué respuesta elige
 uv run python -m gabriela.voice "Hola" --out /tmp/g.wav      # solo voz
 uv run python -m gabriela.voice "Hola" --grabado             # como lo pre-grabado
 uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
@@ -210,17 +193,6 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 - **PyTorch sí llega, pero por la voz**: NeuTTS lo arrastra (~2,5 GB). El
   pipeline de la cabeza sigue sin tocarlo —lee FLAME con stubs propios—, así que
   quien solo construya el modelo no necesita instalarlo.
-- **Google retira modelos con fecha** ([deprecations](https://ai.google.dev/gemini-api/docs/deprecations)):
-  `gemini-3.1-flash-lite` se apaga el 7 de mayo de 2027 y su reemplazo es
-  `gemini-3.5-flash-lite`. Los TTS `*-preview-tts` mueren el 17 de noviembre de
-  2026. Si el chat da 404, ajusta `LLM_MODEL`.
-- **Los Gemini 3 piensan antes de contestar**, y lo pensado se descuenta del tope
-  de 90 tokens. `chat.py` manda `reasoning_effort: minimal` (`LLM_RAZONAMIENTO`);
-  con `gemini-2.5-flash-lite` —más barato, pero sólo para claves que ya lo
-  usaban— pon `none`, porque `minimal` le *encendería* el razonamiento.
-- **Elegir el GGUF**, si vas por local: en un M2 de 8 GB un 3B en Q4 convive con
-  NeuTTS; un 7B no. Si el modelo razona (Qwen3 y parientes), `chat.py` le quita
-  el bloque `<think>` antes de mandarlo al TTS, que si no lo leería en voz alta.
 - **Perillas de la voz** (variables de entorno, ver `.env.example`):
   `NEUTTS_RMS` sube o baja el volumen de salida —NeuTTS entrega más bajo que el
   F5 anterior y `voice.py` lo normaliza—, y `NEUTTS_DEVICE` fuerza `mps`/`cpu`.
@@ -230,8 +202,8 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   muere con «Error processing file .../phontab». `voice.py` lo cambia por el de
   Homebrew después de importar neutts; el día que publiquen una rueda con la
   ruta correcta, ese parche se borra.
-- **Safari exige un gesto reciente para reproducir audio**, y la voz llega medio
-  minuto después del clic. El permiso va atado al elemento `<audio>`, no a la
+- **Safari exige un gesto reciente para reproducir audio**, y la voz llega
+  después del clic (tras transcribir, si se habló). El permiso va atado al elemento `<audio>`, no a la
   página, así que el visor reutiliza **uno solo** para toda la sesión y lo
   desbloquea con 1 ms de silencio al enviar la pregunta. Por eso `avatar.js`
   tiene un `audio` único en vez de crear uno por frase: no es un detalle de
@@ -247,22 +219,14 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   todo lo que acorta la respuesta sigue acortando la espera. Una respuesta de
   10 s tarda 13 s en salir; antes eran 30. Las cifras end-to-end de esta lista
   se midieron con F5 y **están pendientes de re-medir**.
-- **`max_tokens` está en 90 a propósito.** No es por ahorrar tokens: cada frase
-  de más es un bloque más que sintetizar. Va junto con la orden de brevedad en
-  `persona.py`, porque ninguna de las dos basta sola: el modelo se pasa igual, y
-  cortar sin más deja la frase a medias (`chat.py` la recorta a la última
-  completa).
-- **El servidor tarda ~40 s en arrancar porque calienta el modelo**, y no es
-  opcional: sin hacerle decir una palabra al inicio, la primera respuesta
-  costaba **390 s** en vez de 51. Cargar los pesos no basta.
-- Las **muletillas** y las **respuestas frecuentes** se graban en ese mismo
-  arranque, la primera vez: 24 frases (175 s) y 68 frases (342 s), en
-  `assets/voz/muletillas/` y `assets/voz/frecuentes/`, un archivo por frase. Si
+- Las **respuestas frecuentes** y el «no te entendí» se graban en el
+  arranque, la primera vez —unas 90 frases, siete minutos—, en
+  `assets/voz/frecuentes/` y `assets/voz/respaldo/`, un archivo por frase. Si
   cambias la voz de referencia, el modelo o el device, borra esas carpetas o
   seguirá hablando con la voz vieja.
 - **Lo grabado se repite hasta que sale bien.** NeuTTS falla por muestreo: la
-  misma frase sale con su voz o con voz de hombre según la semilla. En vivo hay
-  que quedarse con lo que salga, pero una frase grabada se sintetiza hasta
+  misma frase sale con su voz o con voz de hombre según la semilla. Cada frase
+  grabada se sintetiza hasta
   `NEUTTS_INTENTOS` veces (6) con semilla distinta y se guarda la mejor, medida
   por tono contra `referencia.wav` y por duración contra el texto. Es lo que
   reemplaza al `nfe_step` de F5-TTS: comprar calidad con tiempo, sólo que aquí
@@ -271,12 +235,6 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   costando una sola síntesis. La nota de cada archivo queda en un `notas.json`
   al lado; para que se revise todo otra vez, bórralo. Si una frase no llega en
   seis intentos, queda la menos mala y el log lo dice: óyela y reescríbela.
-- **Las frases de muletilla tienen que ser cortas** (`MAX_BYTES_MULETILLA`, 70
-  bytes ≈ 5 s). El visor descarta el relleno pendiente cuando llega la
-  respuesta, pero deja terminar la frase que suena: esa frase es el retraso
-  máximo que el relleno le cuesta a la respuesta. Con una frase de 9,2 s, la
-  respuesta pasó de entrar a los 9 s a entrar a los 24. Hay un test que lo
-  vigila.
 
 ## Pendiente
 
@@ -298,8 +256,8 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 - **Parecido**: el ajuste monocular sólo observa 51 landmarks frontales, así que
   recupera proporciones, no rasgos finos. Una segunda vista de perfil ayudaría,
   pero no hay ninguna en dominio público con resolución suficiente.
-- Parpadeo, y voz a voz con micrófono (whisper.cpp del lado de la escucha).
-- **Voz propia en Piper**, para bajar la latencia en el clúster: el dataset
-  está hecho (1.566 frases, 93 min), el entrenamiento corre en Colab y el
-  servidor ya la usa con `VOZ_MOTOR=piper`. Falta oír el modelo afinado y
-  medirlo en el clúster. Ver `assets/voz/README.md`.
+- Parpadeo.
+- **Voz propia en Piper**: el dataset está hecho (1.566 frases, 93 min), el
+  entrenamiento corre en Colab y `VOZ_MOTOR=piper` la usa para grabar. Sin
+  síntesis en vivo ya no hace falta por latencia; queda como alternativa a
+  NeuTTS. Ver `assets/voz/README.md`.

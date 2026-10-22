@@ -15,3 +15,5 @@ assets/voz/dataset/
 assets/voz/*.zip
 assets/voz/muletillas-*/
 assets/voz/piper/
+assets/voz/respaldo/
+assets/voz/respaldo-*/

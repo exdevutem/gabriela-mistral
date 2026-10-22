@@ -29,6 +29,9 @@
   button { padding: .7rem 1.3rem; border: 0; border-radius: .4rem; font: inherit;
            background: #7a6a55; color: #14100e; cursor: pointer; }
   button:disabled { opacity: .45; cursor: default; }
+  #microfono { background: transparent; color: var(--tinta); border: 1px solid #7a6a55; }
+  #microfono[aria-pressed="true"] { background: #a5523f; border-color: #a5523f; color: var(--tinta); }
+  #microfono[hidden] { display: none; }
   #aviso { margin: 0; font-size: .78rem; color: var(--tenue); text-align: center; }
   /* Preguntas frecuentes: una sola fila que se arrastra. En vertical ocuparían
      cuatro filas y le comerían la cara, que es lo que la gente vino a ver. */
@@ -64,7 +67,8 @@
     <form id="forma">
       <input id="entrada" autocomplete="off" autofocus
              placeholder="Pregúntale algo…" aria-label="Tu mensaje">
-      <button id="enviar" type="submit">Hablar</button>
+      <button id="microfono" type="button" aria-pressed="false" hidden>Hablarle</button>
+      <button id="enviar" type="submit">Preguntar</button>
     </form>
     <p id="aviso">Recreación con inteligencia artificial. No es una grabación
       ni un testimonio real de Gabriela Mistral (1889–1957).</p>
@@ -79,6 +83,7 @@ const enviar = document.getElementById('enviar');
 const progreso = document.getElementById('progreso');
 const forma = document.getElementById('forma');
 const badges = document.getElementById('badges');
+const microfono = document.getElementById('microfono');
 
 // Sin try, un GLB que falta o viene corrupto aborta el módulo entero: no se
 // crea el WebSocket, no se registra ningún handler y el kiosco queda negro y
@@ -116,7 +121,7 @@ function conectar() {
   };
 }
 const ocupado = (si) => {
-  enviar.disabled = si; entrada.disabled = si;
+  enviar.disabled = si; entrada.disabled = si; microfono.disabled = si;
   for (const b of badges.children) b.disabled = si;
   if (!si) entrada.focus();
 };
@@ -153,6 +158,12 @@ function alMensaje({ data }) {
   }
   if (m.tipo === 'pensando') { esperadas = 0; llegadas = 0; }
   if (m.tipo === 'pensando') { dicho.className = 'pensando'; dicho.textContent = 'pensando…'; }
+  if (m.tipo === 'oido')     {
+    // Lo que entendió Whisper, mientras se elige la respuesta: si contesta
+    // otra cosa, el visitante ve por qué.
+    dicho.className = 'pensando';
+    dicho.textContent = m.texto ? `«${m.texto}»` : 'No te oí bien.';
+  }
   if (m.tipo === 'texto')    {
     dicho.className = '';
     dicho.textContent = m.texto;
@@ -186,6 +197,71 @@ function preguntar(texto) {
   ws.send(texto);
   entrada.value = '';
   ocupado(true);
+}
+
+// --- Micrófono ---
+// Se toca una vez para hablar y otra para terminar; a los SEGUNDOS_MAX se corta
+// solo, para que un botón olvidado no deje el kiosco escuchando la sala.
+// Se manda PCM de 16 bits a 16 kHz, que es lo que lee Whisper: convertirlo aquí
+// le ahorra al servidor depender de ffmpeg para entender webm u mp4.
+//
+// getUserMedia sólo existe en contexto seguro (https o localhost). Servido por
+// http desde otra máquina, el botón no aparece y quedan el texto y los badges.
+const SEGUNDOS_MAX = 8;
+let grabadora = null, corte = 0;
+if (navigator.mediaDevices?.getUserMedia) microfono.hidden = false;
+
+microfono.onclick = async () => {
+  if (grabadora) { grabadora.stop(); return; }
+  avatar?.desbloquear();  // dentro del gesto, igual que preguntar()
+  let flujo;
+  try {
+    flujo = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    dicho.className = 'error';
+    dicho.textContent = 'No tengo permiso para usar el micrófono.';
+    return;
+  }
+  const trozos = [];
+  grabadora = new MediaRecorder(flujo);
+  grabadora.ondataavailable = (e) => trozos.push(e.data);
+  grabadora.onstop = async () => {
+    clearTimeout(corte);
+    flujo.getTracks().forEach((t) => t.stop());
+    grabadora = null;
+    microfono.setAttribute('aria-pressed', 'false');
+    microfono.textContent = 'Hablarle';
+    ocupado(true);
+    try {
+      ws.send(await aPcm16k(new Blob(trozos)));
+    } catch (e) {
+      console.error(e);
+      dicho.className = 'error';
+      dicho.textContent = 'No pude leer lo que grabé. Inténtalo de nuevo.';
+      ocupado(false);
+    }
+  };
+  grabadora.start();
+  microfono.setAttribute('aria-pressed', 'true');
+  microfono.textContent = 'Escuchando… toca para terminar';
+  dicho.className = 'pensando';
+  dicho.textContent = 'Te escucho.';
+  corte = setTimeout(() => grabadora?.stop(), SEGUNDOS_MAX * 1000);
+};
+
+async function aPcm16k(blob) {
+  const ctx = new AudioContext();
+  const audio = await ctx.decodeAudioData(await blob.arrayBuffer());
+  ctx.close();
+  const off = new OfflineAudioContext(1, Math.ceil(audio.duration * 16000), 16000);
+  const fuente = off.createBufferSource();
+  fuente.buffer = audio;
+  fuente.connect(off.destination);
+  fuente.start();
+  const x = (await off.startRendering()).getChannelData(0);
+  const pcm = new Int16Array(x.length);
+  for (let i = 0; i < x.length; i++) pcm[i] = Math.max(-1, Math.min(1, x[i])) * 32767;
+  return pcm.buffer;
 }
 
 forma.onsubmit = (e) => {

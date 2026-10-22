@@ -1,14 +1,15 @@
 # Despliegue en el cluster de exdev
 
-Una imagen, dos modos según haya o no `GEMINI_API_KEY`:
+Una imagen, sin chat: FastAPI sirve el visor y contesta las preguntas
+frecuentes con respuestas grabadas. Lo que el visitante dice lo transcribe
+Whisper y lo empareja un modelo de embeddings, los dos dentro del contenedor.
+No necesita ninguna clave de API.
 
-- **Con clave** (Google AI Studio por defecto): el texto y la voz salen de la API
-  de Gemini y el contenedor no carga modelos. Es el modo recomendado. Con
-  `VOZ_MOTOR=neutts` la voz vuelve a ser local: **~5 GB de RAM.**
-- **Sin clave**: se levanta el `llama-server` incluido y todo corre sin red.
-  **~8 GB de RAM.** La salida si el nodo se queda sin internet.
-
-En ambos, FastAPI sirve el visor, la voz y los visemas.
+> [!NOTE]
+> Hasta octubre de 2026 la imagen levantaba además un `llama-server` para el
+> chat. El `arranque.sh` ya no lo inicia, pero el `Dockerfile` todavía lo
+> compila y las cifras de RAM y CPU de más abajo se midieron con chat y voz en
+> vivo: hay que adelgazar la imagen y re-medir.
 
 > [!WARNING]
 > **Esta imagen nunca se ha construido.** Se escribió en una máquina sin Docker,
@@ -98,7 +99,7 @@ lectura.
 
 ```bash
 docker run --rm -p 8000:8000 \
-  -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+  -e HF_TOKEN="$HF_TOKEN" \
   -v gabriela-modelos:/modelos \
   -v "$PWD/assets/voz:/app/assets/voz:ro" \
   ghcr.io/exdevutem/gabriela-mistral:0.1.0
@@ -128,23 +129,19 @@ Variables que conviene fijar en el contenedor:
 
 | Variable | Por defecto | Para qué |
 |---|---|---|
-| `GEMINI_API_KEY` | vacío | Clave de Google AI Studio, para texto y voz. Vacía (y sin `LLM_API_KEY`) = modelo local. |
-| `LLM_API_KEY` | `GEMINI_API_KEY` | Clave de otro proveedor compatible con OpenAI. |
-| `LLM_MODEL` | `gemini-3.1-flash-lite` | Se apaga el 7-may-2027; pasar a `gemini-3.5-flash-lite`. |
-| `LLM_URL` | Gemini (compatible con OpenAI) | Otro proveedor compatible con OpenAI. |
-| `LLM_RAZONAMIENTO` | `minimal` con Gemini | `none` para `gemini-2.5-flash-lite`. |
+| `WHISPER_MODELO` | `openai/whisper-small` | `openai/whisper-base` pesa un tercio y se equivoca más. |
+| `EMBEDDINGS_MODELO` | `paraphrase-multilingual-MiniLM-L12-v2` | El que elige la respuesta. |
+| `UMBRAL` | `0.5` | Parecido mínimo; por debajo dice «no te entendí». |
+| `RESPALDO_DIR` | `/modelos/respaldo` | Dónde se graba el «no te entendí». |
+| `GEMINI_API_KEY` | vacío | Sólo con `VOZ_MOTOR=gemini`. |
 | `GEMINI_TTS_MODELO` | `gemini-3.8-flash-lite-tts` | El TTS más barato. |
 | `GEMINI_VOZ` | `Gacrux` | Voz prefabricada; también Sulafat o Vindemiatrix. |
 | `GEMINI_ESTILO` | maestra chilena mayor, pausada | Cómo se le pide que hable. |
 | `NEUTTS_DEVICE` | `cpu` en la imagen, `auto` fuera | `auto` elige mps si lo hay. |
 | `NEUTTS_RMS` | `0.09` | Volumen de salida. Súbelo si la sala es ruidosa. |
-| `HF_TOKEN` | vacío | **Obligatorio con `VOZ_MOTOR=neutts`**: esa voz vive en repos *gated*. |
-| `LLM_CTX` | `2048` | Contexto del LLM. Subirlo cuesta RAM. |
-| `LLM_THREADS` | todos los núcleos | Hilos de llama.cpp. |
-| `LLM_GGUF` | `Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M` | Otro modelo. |
-| `VOZ_MOTOR` | `gemini` | `neutts` clona la referencia en local; `piper` usa la voz propia, más rápida que tiempo real en CPU. |
+| `HF_TOKEN` | vacío | **Obligatorio con `VOZ_MOTOR=neutts`** mientras falte algo por grabar: esa voz vive en repos *gated*. |
+| `VOZ_MOTOR` | `neutts` | Quién graba las respuestas. `piper` usa la voz propia; `gemini`, una prefabricada (10 peticiones al día gratis). |
 | `PIPER_MODELO` | `assets/voz/piper/es_419-gabriela-medium.onnx` | Con su `.onnx.json` al lado; entra con el montaje de `assets/voz`. |
-| `MULETILLAS_DIR` | `/modelos/muletillas` | Dónde se graba el relleno hablado. Con otro motor se le suma `-<motor>`. |
 | `FRECUENTES_DIR` | `/modelos/frecuentes` | Dónde se graban las respuestas de los badges. Con otro motor se le suma `-<motor>`. |
 
 ## Cuánta RAM y CPU asignarle

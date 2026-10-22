@@ -1,4 +1,4 @@
-"""Configuración central: modelos locales y rutas."""
+"""Configuración central: modelos locales, respuestas y rutas."""
 from __future__ import annotations
 
 import os
@@ -14,41 +14,17 @@ VOZ = ASSETS / "voz"
 # override: gana el .env del proyecto por sobre variables exportadas en el shell
 load_dotenv(ROOT / ".env", override=True)
 
-# --- Google AI Studio (API de Gemini) ---
-# Una sola clave para el texto y la voz. Se saca gratis y sin tarjeta en
-# https://aistudio.google.com/apikey. Ojo: en el nivel gratuito Google usa lo
-# que se le manda para mejorar sus productos, y aquí escriben visitantes.
+# --- Voz: qué motor graba las respuestas ---
+# Ya no habla en vivo: sólo graba, al arrancar, las respuestas que falten.
+# "neutts" clona desde la referencia y es lo probado. "piper" es la voz propia
+# afinada con F5-TTS de maestra (pipeline/entrenar_piper.ipynb). "gemini" es el
+# TTS de Google AI Studio: no clona, y su nivel gratuito da 3 peticiones por
+# minuto y 10 al día (medido el 21 de octubre de 2026), que no alcanzan ni para
+# grabar lo fijo una vez.
+MOTOR = os.getenv("VOZ_MOTOR", "neutts")
+# --- Voz: Gemini TTS (sólo con VOZ_MOTOR=gemini) ---
+# Clave gratuita en https://aistudio.google.com/apikey.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-# --- Chat: cualquier API compatible con OpenAI ---
-# Por defecto Gemini por su endpoint compatible con OpenAI. Apuntando LLM_URL a
-# un llama-server local, el mismo código funciona sin cuenta ni internet: es la
-# salida si el museo se queda sin red.
-LLM_URL = os.getenv("LLM_URL",
-                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
-# El más barato al que llega una clave nueva (octubre de 2026: 0,25 / 1,50 USD
-# por millón de tokens de entrada / salida, y gratis en el nivel gratuito).
-# Google lo apaga el 7 de mayo de 2027; su reemplazo es gemini-3.5-flash-lite.
-# gemini-2.5-flash-lite es más barato aún, pero sólo para claves que ya lo
-# usaban: si la tuya llega, ponlo aquí junto con LLM_RAZONAMIENTO=none.
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.1-flash-lite")
-LLM_API_KEY = os.getenv("LLM_API_KEY") or GEMINI_API_KEY  # vacío para un llama-server local
-# Los Gemini 3 piensan antes de contestar y lo pensado se cobra y se descuenta
-# del tope de 90 tokens de chat.py: sin esto la respuesta sale cortada o vacía.
-# "minimal" es lo menos que admiten (no se puede apagar). En un 2.5, "none" sí
-# lo apaga, y "minimal" lo *encendería* con 1024 tokens. Vacío = no mandarlo,
-# que es lo que quiere cualquier proveedor que no sea Gemini.
-LLM_RAZONAMIENTO = os.getenv(
-    "LLM_RAZONAMIENTO", "minimal" if "generativelanguage" in LLM_URL else "")
-
-# --- Voz: qué motor habla en vivo ---
-# "gemini" es el TTS de Google AI Studio: no carga pesos ni quema CPU, que es lo
-# que le faltaba al clúster, pero no clona —habla una voz prefabricada— y
-# necesita red. "neutts" clona desde la referencia y es lo probado en local.
-# "piper" es la voz propia afinada con F5-TTS de maestra
-# (pipeline/entrenar_piper.ipynb), más rápida que tiempo real en CPU.
-MOTOR = os.getenv("VOZ_MOTOR", "gemini")
-# --- Voz: Gemini TTS ---
 # El TTS más barato de la API (octubre de 2026: 6 USD por millón de tokens de
 # audio, ~0,0015 USD por 10 s; gratis en el nivel gratuito). Los *-preview-tts*
 # se apagan el 17 de noviembre de 2026: no volver a ellos.
@@ -80,60 +56,12 @@ REF_TEXTO = VOZ / "referencia.txt"
 # y aceptar los términos una vez, con HF_TOKEN en el entorno. Sin eso la
 # descarga responde 403 y el servidor arranca sin voz.
 
-# Lo que dice mientras piensa. Se sintetizan una vez y se guardan: son siempre
-# las mismas, y pagarlas en cada pregunta sería añadir espera a la espera.
+# Preguntas frecuentes: lo único que ella responde. No hay chat: lo que el
+# visitante escribe o dice se compara con estas preguntas y sus respuestas
+# (ver entender.py) y suena la grabada que más se le parezca. La página las
+# ofrece además como badges bajo la caja de texto.
 #
-# Cada una empieza con una frase que compra tiempo y sigue contando el museo.
-# El servidor las manda troceadas por frase y el visor descarta los trozos que
-# no alcanzaron a sonar, así que el largo no se paga: si la respuesta llega
-# pronto, se oye sólo el principio.
-#
-# Los números van con letras a propósito: el TTS lee "1941" como puede.
-#
-# TODO lo que se afirma aquí está verificado contra la historia oficial del
-# museo (museodelaeducacion.gob.cl) y contra «Lucila Gabriela: La voz de la
-# Maestra» (MEGM, 2008). Si agregas una, verifica igual: ella no debe decir
-# cosas falsas sobre un museo real, y menos hablando en primera persona.
-#
-# Una carpeta por motor: a las muletillas las sigue la voz en vivo, y si las
-# grabó otro motor el timbre cambia a mitad de respuesta. Así, cambiar de motor
-# graba las suyas en el siguiente arranque en vez de mezclar voces. El sufijo
-# va también sobre MULETILLAS_DIR, que la imagen Docker fija.
-MULETILLAS_DIR = Path(os.getenv("MULETILLAS_DIR", VOZ / "muletillas"))
-if MOTOR != "neutts":
-    MULETILLAS_DIR = MULETILLAS_DIR.with_name(f"{MULETILLAS_DIR.name}-{MOTOR}")
-MULETILLAS = [
-    "Mientras busco las palabras, déjame contarte dónde estás. "
-    "Este edificio fue la Escuela Normal Número Uno. "
-    "Aquí rendí mis exámenes de habilitación, el año diez. "
-    "Nunca tuve título de normalista. "
-    "Me hice maestra leyendo y enseñando. "
-    "Casi cien años después, le pusieron mi nombre a esta casa.",
-
-    "Dame un momento, que no quiero contestarte cualquier cosa. "
-    "Te cuento algo mientras. "
-    "Este museo nació el año cuarenta y uno. "
-    "Entonces se llamaba Museo Pedagógico de Chile. "
-    "Se mudó a esta casa en el ochenta y uno. "
-    "Un terremoto la cerró el ochenta y cinco. "
-    "Estuvo veintiún años sin abrir.",
-
-    "Espera, que la respuesta se me está formando. "
-    "Mira a tu alrededor mientras tanto. "
-    "Los bancos, los mapas, las máquinas de escribir. "
-    "Proyectores de otro siglo. "
-    "La campana de la primera Escuela de Preceptores de Chile. "
-    "Y los instrumentos de castigo, que también son historia.",
-
-    "Déjame pensar un poco. "
-    "Esta casa fue escuela de niñas por casi noventa años. "
-    "Su primera directora chilena fue Brígida Walker. "
-    "La conocí cuando vine a rendir mis exámenes. "
-    "Piensa en cuántas niñas cruzaron esta puerta antes que tú.",
-]
-
-# Preguntas frecuentes: los badges que la página ofrece bajo la caja de texto.
-# La respuesta va grabada, no la escribe el LLM: suena al instante, siempre dice
+# La respuesta va grabada, no la escribe un modelo: suena al instante, siempre dice
 # lo mismo y no hay forma de que invente una fecha. Es lo que corresponde a un
 # museo real —un dato falso aquí se lo lleva el visitante a casa creyendo que se
 # lo dijo ella—, y es también la respuesta más rápida que el sistema puede dar.
@@ -143,8 +71,9 @@ MULETILLAS = [
 # Lo que es opinión suya («eso es lo que no hay que hacerle a un niño») va en su
 # voz y se distingue de lo que es dato; los datos no se adornan.
 FRECUENTES_DIR = Path(os.getenv("FRECUENTES_DIR", VOZ / "frecuentes"))
-# Mismo sufijo que las muletillas: una respuesta grabada con otro motor hablaría
-# con otra voz que la de en vivo.
+# Una carpeta por motor: grabadas con motores distintos, las respuestas
+# hablarían con voces distintas. Cambiar de motor graba las suyas en el
+# siguiente arranque en vez de mezclar voces.
 if MOTOR != "neutts":
     FRECUENTES_DIR = FRECUENTES_DIR.with_name(f"{FRECUENTES_DIR.name}-{MOTOR}")
 FRECUENTES = [
@@ -247,7 +176,88 @@ FRECUENTES = [
      "El diez de enero de mil novecientos cincuenta y siete. "
      "En un hospital de Nueva York, lejos de Chile. "
      "Un cáncer al páncreas."),
+
+    # --- Lo que antes eran muletillas ---
+    # Rellenaban la espera del chat. Sin chat no hay espera, y lo que contaban
+    # —verificado como todo lo demás— queda como respuesta propia. Los números
+    # siguen con letras: el TTS lee "1941" como puede.
+    ("¿Qué pasó en esta casa?",
+     "Este edificio fue la Escuela Normal Número Uno. "
+     "Aquí rendí mis exámenes de habilitación, el año diez. "
+     "Nunca tuve título de normalista. "
+     "Me hice maestra leyendo y enseñando. "
+     "Casi cien años después, le pusieron mi nombre a esta casa."),
+
+    ("¿Cómo empezó el museo?",
+     "Este museo nació el año cuarenta y uno. "
+     "Entonces se llamaba Museo Pedagógico de Chile. "
+     "Se mudó a esta casa en el ochenta y uno. "
+     "Un terremoto la cerró el ochenta y cinco. "
+     "Estuvo veintiún años sin abrir."),
+
+    ("¿Qué puedo mirar aquí?",
+     "Mira a tu alrededor. "
+     "Los bancos, los mapas, las máquinas de escribir. "
+     "Proyectores de otro siglo. "
+     "La campana de la primera Escuela de Preceptores de Chile. "
+     "Y los instrumentos de castigo, que también son historia."),
+
+    ("¿Quiénes estudiaron aquí?",
+     "Esta casa fue escuela de niñas por casi noventa años. "
+     "Su primera directora chilena fue Brígida Walker. "
+     "La conocí cuando vine a rendir mis exámenes. "
+     "Piensa en cuántas niñas cruzaron esta puerta antes que tú."),
 ]
+
+# Otras formas de hacer la misma pregunta. El elector compara lo que dijo el
+# visitante con la pregunta, con su respuesta y con éstas: sin ellas confunde
+# vecinas —«¿dónde queda esto?» se parece más a «¿Qué se guarda aquí?» que a
+# «¿Dónde estamos?»—. Si una pregunta real cae en la respuesta equivocada,
+# agregarla aquí es el arreglo; la clave tiene que ser una de FRECUENTES.
+VARIANTES = {
+    "¿Qué fue este edificio?": ["¿Qué era esta casa antes?", "¿Para qué servía este lugar?"],
+    "¿Desde cuándo existe el museo?": ["¿Cuántos años tiene el museo?",
+                                       "¿Cuándo llegó el museo a esta casa?"],
+    "¿Por qué lleva tu nombre?": ["¿Por qué el museo se llama Gabriela Mistral?"],
+    "¿Qué se guarda aquí?": ["¿Qué hay en el museo?", "¿Qué cosas tiene el museo?"],
+    "¿Por qué estuvo cerrado?": ["¿Por qué cerraron el museo?"],
+    "¿Quién fue Brígida Walker?": ["¿Quién era la directora de la escuela?",
+                                   "¿Conociste a la directora?"],
+    "¿Dónde estamos?": ["¿Dónde queda esto?", "¿Cuál es la dirección del museo?",
+                        "¿En qué barrio estamos?"],
+    "¿Cuál es tu nombre verdadero?": ["¿Cómo te llamabas?", "¿Quién eres?"],
+    "¿Cuándo naciste?": ["¿Dónde naciste?", "¿Qué edad tienes?"],
+    "¿Tenías título de maestra?": ["¿Estudiaste para profesora?"],
+    "¿Dónde enseñaste?": ["¿Dónde fuiste profesora?", "¿En qué escuelas trabajaste?"],
+    "¿Ganaste el Premio Nobel?": ["¿Qué premios ganaste?", "¿Por qué eres famosa?"],
+    "¿Qué te pasó de niña en la escuela?": ["¿Cómo fue tu infancia en el colegio?",
+                                            "¿Te castigaron de niña?"],
+    "¿Qué puedo mirar aquí?": ["¿Qué puedo ver en el museo?", "¿Qué me recomiendas mirar?"],
+}
+
+# Lo que dice cuando no reconoce la pregunta entre las frecuentes. Mejor eso
+# que contestar otra cosa con toda seguridad: en un museo, una respuesta que no
+# viene al caso suena a que ella no escuchó, y una inventada es peor.
+RESPALDO = ("No te entendí bien. "
+            "Pregúntame por mí o por esta casa. "
+            "Abajo tienes algunas preguntas, si quieres.")
+RESPALDO_DIR = Path(os.getenv("RESPALDO_DIR", VOZ / "respaldo"))
+if MOTOR != "neutts":
+    RESPALDO_DIR = RESPALDO_DIR.with_name(f"{RESPALDO_DIR.name}-{MOTOR}")
+
+# --- Entender la pregunta (todo local, ver entender.py) ---
+# Whisper pasa la voz a texto; no sabe elegir una respuesta. Eso lo hace un
+# modelo de embeddings multilingüe, que compara el sentido de lo dicho con cada
+# pregunta frecuente y su respuesta. "small" entiende bien el español de un
+# visitante hablándole a un micrófono de sala; "base" es tres veces más liviano
+# y se equivoca más con nombres propios.
+WHISPER_MODELO = os.getenv("WHISPER_MODELO", "openai/whisper-small")
+EMBEDDINGS_MODELO = os.getenv(
+    "EMBEDDINGS_MODELO", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+# Parecido mínimo (coseno, de -1 a 1) para darle a una pregunta por reconocida.
+# Por debajo suena RESPALDO. Subirlo hace que diga «no te entendí» más seguido;
+# bajarlo, que conteste algo que no le preguntaron.
+UMBRAL = float(os.getenv("UMBRAL", "0.5"))
 
 # El mundo físico necesita perillas.
 # "auto" = mps si la máquina lo tiene, cpu si no. Se resuelve en voice.py, que

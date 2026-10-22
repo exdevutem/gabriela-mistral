@@ -1,117 +1,18 @@
-"""Comprobaciones de las dos piezas locales. Sin framework: `python tests/test_local.py`.
+"""Comprobaciones de la lógica local. Sin framework: `python tests/test_local.py`.
 
-Ninguna carga NeuTTS ni necesita llama-server levantado: lo que se prueba es la
-lógica que rodea a ambos —historial, saneado de la respuesta, conversión a PCM—,
-que es donde puede romperse en silencio.
+Ninguna carga NeuTTS, Whisper ni el modelo de embeddings: lo que se prueba es
+la lógica que los rodea —elegir respuesta, lo grabado, conversión a PCM—, que
+es donde puede romperse en silencio.
 """
-import json
 import sys
-import threading
 import wave
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, "src")
 
-RESPUESTA = "<think>divagaciones internas</think>\nLa piedra también enseña."
-
-
-class _Falso(BaseHTTPRequestHandler):
-    """Imita /v1/chat/completions de llama-server y guarda lo que recibió."""
-
-    recibido = None
-    autorizacion = None
-    contenido = RESPUESTA
-    motivo = "stop"
-    codigo = 200
-
-    def do_POST(self):
-        _Falso.autorizacion = self.headers.get("Authorization")
-        _Falso.recibido = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        if _Falso.codigo != 200:
-            self.send_response(_Falso.codigo)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-        datos = json.dumps({"choices": [
-            {"message": {"content": _Falso.contenido}, "finish_reason": _Falso.motivo}
-        ]}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(datos)))
-        self.end_headers()
-        self.wfile.write(datos)
-
-    def log_message(self, *a):
-        pass
-
-
-_srv = HTTPServer(("127.0.0.1", 0), _Falso)
-threading.Thread(target=_srv.serve_forever, daemon=True).start()
-
-import os  # noqa: E402  (la URL tiene que estar puesta antes de importar config)
-
-os.environ["LLM_URL"] = f"http://127.0.0.1:{_srv.server_address[1]}/v1/chat/completions"
-
-from gabriela.chat import Conversacion  # noqa: E402
 from gabriela.voice import SAMPLE_RATE, a_wav  # noqa: E402
-
-
-def test_manda_la_persona_y_acumula_historial():
-    c = Conversacion()
-    c.responder("¿Quién eres?")
-    c.responder("¿Y el agua?")
-    roles = [m["role"] for m in _Falso.recibido["messages"]]
-    assert roles == ["system", "user", "assistant", "user"], roles
-    assert "Gabriela Mistral" in _Falso.recibido["messages"][0]["content"]
-
-
-def test_quita_el_bloque_de_razonamiento():
-    # Si se cuela, el TTS lee las divagaciones del modelo en voz alta.
-    dicho = Conversacion().responder("hola")
-    assert dicho == "La piedra también enseña.", repr(dicho)
-
-
-def test_manda_la_clave_solo_si_la_hay():
-    # Se fija el valor a mano: si no, el .env del desarrollador decide el
-    # resultado del test, y pasa o falla según quién lo ejecute.
-    import gabriela.chat as chat
-
-    real = chat.LLM_API_KEY
-    try:
-        chat.LLM_API_KEY = ""
-        Conversacion().responder("hola")
-        assert _Falso.autorizacion is None, "sin clave no debe mandarse cabecera"
-
-        chat.LLM_API_KEY = "clave-de-prueba"
-        Conversacion().responder("hola")
-        assert _Falso.autorizacion == "Bearer clave-de-prueba", _Falso.autorizacion
-    finally:
-        chat.LLM_API_KEY = real
-
-
-def test_la_cuota_agotada_se_nombra():
-    # Un 429 mudo se confunde con un fallo de red y cuesta media hora.
-    _Falso.codigo = 429
-    try:
-        Conversacion().responder("hola")
-        raise AssertionError("debió fallar")
-    except RuntimeError as e:
-        assert "429" in str(e), e
-    finally:
-        _Falso.codigo = 200
-
-
-def test_respuesta_truncada_acaba_en_frase_completa():
-    # Al tope de tokens el modelo corta a media palabra; hablado suena a fallo.
-    _Falso.contenido = "La piedra enseña. El agua tam"
-    _Falso.motivo = "length"
-    try:
-        assert Conversacion().responder("hola") == "La piedra enseña."
-    finally:
-        _Falso.contenido, _Falso.motivo = RESPUESTA, "stop"
 
 
 def test_wav_es_el_formato_que_espera_el_navegador():
@@ -136,21 +37,6 @@ def test_el_troceo_no_pierde_ni_desborda():
     # porque chunk_text recorta cada trozo por los bordes.
     assert " ".join(partes).split() == texto.split()
     assert trozos("Ay.") == ["Ay."], "una frase corta no debe trocearse"
-
-
-def test_las_frases_de_muletilla_son_cortas():
-    # La muletilla se reproduce entera, así que estas frases ya no retrasan la
-    # respuesta. Siguen cortas por otra razón: la primera es la que decide
-    # cuándo deja de haber silencio, y el visor no puede empezar a hablar hasta
-    # tenerla completa. Con 70 bytes, empieza a los 2,7-4,9 s.
-    from gabriela.voice import MAX_BYTES_MULETILLA, trozos
-
-    from gabriela.config import FRECUENTES, MULETILLAS
-
-    for texto in MULETILLAS + [r for _, r in FRECUENTES]:
-        for frase in trozos(texto):
-            largo = len(frase.encode())
-            assert largo <= MAX_BYTES_MULETILLA, f"{largo} bytes: {frase!r}"
 
 
 def test_las_preguntas_frecuentes_no_se_repiten():
@@ -198,9 +84,9 @@ def test_una_frecuente_a_medias_no_se_ofrece():
             voz.frecuentes.cache_clear()
 
 
-def test_muletillas_se_leen_y_no_se_regraban():
-    # Si grabar_muletillas() no respetara lo ya grabado y revisado, cada
-    # arranque del contenedor costaría una síntesis por frase de más.
+def test_lo_grabado_se_lee_y_no_se_regraba():
+    # Si _grabar() no respetara lo ya grabado y revisado, cada arranque del
+    # contenedor cargaría NeuTTS y volvería a sintetizar todo.
     import json
     import tempfile
     import wave as W
@@ -209,55 +95,22 @@ def test_muletillas_se_leen_y_no_se_regraban():
 
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
-        original, voz.MULETILLAS_DIR = voz.MULETILLAS_DIR, d
-        voz.muletillas.cache_clear()
+        original, voz.RESPALDO_DIR = voz.RESPALDO_DIR, d
+        voz.respaldo.cache_clear()
         try:
-            assert voz.muletillas() == [], "sin archivos no debe haber muletillas"
-            # Se fabrican a mano para no invocar a NeuTTS en un test.
-            for i, texto in enumerate(voz.MULETILLAS):
-                for j in range(len(voz.trozos(texto))):
-                    with W.open(str(d / f"{i}-{j}.wav"), "wb") as w:
-                        w.setnchannels(1); w.setsampwidth(2); w.setframerate(24_000)
-                        w.writeframes(b"\x00\x00" * 2400)
-            voz.muletillas.cache_clear()
-            leidas = voz.muletillas()
-            assert len(leidas) == len(voz.MULETILLAS), leidas
-            primera = voz.trozos(voz.MULETILLAS[0])
-            assert [f for f, _ in leidas[0]] == primera, "cada trozo con su frase"
-            # Con su nota puesta, como quedan tras un arranque normal: lo que
-            # ya se revisó no se vuelve ni a puntuar ni a grabar. Sin ella se
-            # rehacen, que es lo que arregla las tomas viejas malas (hay otro
-            # test para eso).
-            (d / voz.NOTAS).write_text(json.dumps(
-                {r.name: 0.9 for r in d.glob("*.wav")}))
-            assert voz.grabar_muletillas() == 0, "no debe regrabar lo ya revisado"
+            assert voz.respaldo() == [], "sin archivos no hay respaldo"
+            frases = voz.trozos(voz.RESPALDO)
+            for j in range(len(frases)):
+                with W.open(str(d / f"0-{j}.wav"), "wb") as w:
+                    w.setnchannels(1); w.setsampwidth(2); w.setframerate(24_000)
+                    w.writeframes(b"\x00\x00" * 2400)
+            voz.respaldo.cache_clear()
+            assert [f for f, _ in voz.respaldo()] == frases, "cada trozo con su frase"
+            (d / voz.NOTAS).write_text(json.dumps({r.name: 0.9 for r in d.glob("*.wav")}))
+            assert voz.grabar_respaldo() == 0, "no debe regrabar lo ya revisado"
         finally:
-            voz.MULETILLAS_DIR = original
-            voz.muletillas.cache_clear()
-
-
-def test_una_muletilla_a_medias_no_se_usa():
-    # Si se corta la grabación a mitad (un Ctrl-C, un contenedor que muere),
-    # la muletilla quedaría contando una historia que se interrumpe en seco.
-    import tempfile
-    import wave as W
-
-    import gabriela.voice as voz
-
-    with tempfile.TemporaryDirectory() as tmp:
-        d = Path(tmp)
-        original, voz.MULETILLAS_DIR = voz.MULETILLAS_DIR, d
-        voz.muletillas.cache_clear()
-        try:
-            # Sólo el primer trozo de la primera muletilla: incompleta.
-            with W.open(str(d / "0-0.wav"), "wb") as w:
-                w.setnchannels(1); w.setsampwidth(2); w.setframerate(24_000)
-                w.writeframes(b"\x00\x00" * 2400)
-            voz.muletillas.cache_clear()
-            assert voz.muletillas() == [], "una muletilla a medias no debe usarse"
-        finally:
-            voz.MULETILLAS_DIR = original
-            voz.muletillas.cache_clear()
+            voz.RESPALDO_DIR = original
+            voz.respaldo.cache_clear()
 
 
 # --- Calidad de lo pre-grabado ---
@@ -461,7 +314,7 @@ def test_gemini_graba_una_sola_toma_y_espera_la_cuota():
     reales = voz.sintetizar, voz.MOTOR
     voz.sintetizar, voz.MOTOR = falso, "gemini"
     try:
-        pcm = voz._con_paciencia("Hola.", esperas=(0,))
+        pcm = voz.con_paciencia("Hola.", esperas=(0,))
         assert pcm == b"\x01\x00" * 10 and len(llamadas) == 2, llamadas
         llamadas.clear()
         voz.sintetizar = lambda t, temperatura=None, semilla=None: llamadas.append(t) or b"\x00\x00"
@@ -469,6 +322,52 @@ def test_gemini_graba_una_sola_toma_y_espera_la_cuota():
         assert len(llamadas) == 1, f"{len(llamadas)} tomas en vez de una"
     finally:
         voz.sintetizar, voz.MOTOR = reales
+
+
+# --- Entender la pregunta ---
+
+
+def test_las_variantes_apuntan_a_preguntas_que_existen():
+    # Una clave mal copiada no falla: sus variantes simplemente no cuentan, y
+    # la pregunta que debían rescatar sigue cayendo en otra.
+    from gabriela.config import FRECUENTES, VARIANTES
+
+    sobran = set(VARIANTES) - {p for p, _ in FRECUENTES}
+    assert not sobran, f"variantes de preguntas que no existen: {sobran}"
+
+
+def test_elige_la_mas_parecida_entre_las_grabadas():
+    from gabriela.entender import mas_parecida
+
+    # Tres textos, de las preguntas 0, 1 y 1 (pregunta, respuesta, variante).
+    vectores = np.array([[1, 0, 0], [0, 1, 0], [0, .6, .8]], dtype=float)
+    duenos = np.array([0, 1, 1])
+    consulta = np.array([0, .6, .8])
+
+    assert mas_parecida(consulta, vectores, duenos, [True, True])[0] == 1
+    # La 1 no está grabada: no puede elegirse aunque sea la mejor, y la 0 no
+    # se le parece lo bastante, así que no hay respuesta.
+    assert mas_parecida(consulta, vectores, duenos, [True, False])[0] is None
+    # Bajo el umbral no se contesta, por cerca que esté la mejor.
+    assert mas_parecida(np.array([.4, .4, 0]), vectores, duenos, [True, True],
+                        umbral=0.5)[0] is None
+
+
+def test_el_silencio_no_llega_a_whisper():
+    # Whisper en silencio alucina créditos de subtítulos, y el elector podría
+    # encontrarles parecido con algo.
+    import gabriela.entender as e
+
+    def no_debe(*a):
+        raise AssertionError("cargó Whisper")
+
+    real, e._whisper = e._whisper, no_debe
+    try:
+        assert e.transcribir(b"") == ""
+        assert e.transcribir(b"\x00\x00" * 16_000) == ""
+    finally:
+        e._whisper = real
+    assert e.elegir("   ", set()) is None
 
 
 if __name__ == "__main__":
