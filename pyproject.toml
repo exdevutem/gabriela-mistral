@@ -19,6 +19,11 @@ dependencies = [
     "huggingface-hub",
     "python-dotenv",
     "piper-tts>=1.8.0",
+    # Voz en vivo (src/gabriela/vivo.py): el backbone de NeuTTS en GGUF. Compila
+    # llama.cpp al instalar y en un Mac con Apple Silicon lo hace con Metal;
+    # hace falta cmake (`brew install cmake`).
+    "llama-cpp-python>=0.3.16",
+    "gguf",
 ]
 
 [build-system]
