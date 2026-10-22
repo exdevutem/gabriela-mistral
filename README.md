@@ -263,11 +263,11 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   peinado medida en la foto y se colorea aparte, lo que da volumen y un borde
   que sigue el nacimiento del pelo. Pero es un volumen liso: no hay raya, ondas
   ni mechones, y cubre las orejas más de lo que debería.
-- **De perfil no funciona.** La textura es proyectiva: sólo es válida para lo
-  que la cámara veía. Los vértices que miran hacia atrás muestrean la cara por
-  el otro lado, así que de frente se ve bien y girando el modelo no. Para el uso
-  previsto —una conversación cara a cara— alcanza, pero es el límite duro de
-  este enfoque.
+- **De perfil, la foto se acaba.** La textura se hornea en un mapa cilíndrico
+  (`pipeline/textura.py`): lo que la foto frontal ve sale de la foto, y la nuca,
+  la coronilla y los costados se rellenan con el gris del pelo o el tono de la
+  piel que los rodea. Girando el modelo ya no aparece la cara reflejada en la
+  nuca, pero detrás de la oreja el pelo pasa de fotografía a tono liso.
 - **Una sola foto**: la textura hereda la iluminación del original, con sus
   sombras horneadas. Por eso la escena se ilumina de forma plana: sumarle un
   esquema de tres puntos duplicaba las sombras.
