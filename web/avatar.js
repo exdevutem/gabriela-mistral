@@ -101,15 +101,16 @@ export async function crearAvatar(canvas) {
     ajustar();
     const dt = reloj.getDelta(), t = reloj.getElapsedTime();
 
-    if (pista && audio && !audio.paused) {
+    if (pista?.length && !audio.paused) {
       const ahora = audio.currentTime;
+      if (pista[cursor][0] > ahora) cursor = 0;  // se retrocedió con la barra
       while (cursor + 1 < pista.length && pista[cursor + 1][0] <= ahora) cursor++;
       const [, visema, peso] = pista[cursor];
       objetivo.fill(0);
       if (indices[visema] !== undefined) objetivo[indices[visema]] = peso;
-    } else if (pista && audio && audio.ended) {
-      objetivo.fill(0);
-      if (!cola.length) pista = null;  // con más frases en cola, 'ended' encadena
+    } else if (pista) {
+      objetivo.fill(0);  // en pausa o terminada: la boca se cierra
+      if (audio.ended && !cola.length) pista = null;  // con más en cola, 'ended' encadena
     }
 
     if (!manual) {
@@ -132,6 +133,9 @@ export async function crearAvatar(canvas) {
   return {
     nombres,
     malla,  // expuesta para inspección desde la página de ajuste
+    // Expuesto para el reproductor de la página: pausar, reanudar, adelantar
+    // y el tiempo son los del elemento tal cual. Sólo detener necesita más.
+    audio,
     /**
      * Encola una frase. El servidor las manda una a una según las sintetiza, así
      * que ella empieza a hablar con la primera mientras llegan las demás; si se
@@ -139,11 +143,6 @@ export async function crearAvatar(canvas) {
      */
     hablar(audioBase64, visemas, relleno = false) {
       manual = false;
-      // La muletilla se reproduce ENTERA, aunque la respuesta ya esté lista.
-      // Cuenta algo del museo —«déjame contarte dónde estás»— y cortarla a
-      // mitad dejaría la promesa sin cumplir y la información a medias. El
-      // precio es que la respuesta espera su turno en la cola: se sintetiza
-      // mientras la muletilla suena, así que al terminar ya está esperando.
       cola.push([audioBase64, visemas, relleno]);
       if (encadenando) return Promise.resolve();
       encadenando = true;
@@ -164,6 +163,17 @@ export async function crearAvatar(canvas) {
         () => { desbloqueado = true; },
         (e) => { desbloqueado = e.name === 'AbortError'; },
       );
+    },
+
+    /** Calla y descarta lo que quedaba por decir. */
+    detener() {
+      cola.length = 0;
+      encadenando = false;
+      audio.pause();
+      audio.currentTime = 0;
+      pista = null;
+      objetivo.fill(0);
+      audio.dispatchEvent(new Event('detenido'));
     },
 
     /** Para la página de ajuste: fija un morph target a mano. */

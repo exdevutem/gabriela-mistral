@@ -39,6 +39,13 @@ texto o badge ──────────────────┘         
 - **El micrófono** sólo funciona con la página en `localhost` o `https`: el
   navegador no lo ofrece en `http` desde otra máquina. Sin él quedan el texto y
   los badges.
+- **Mientras habla el visitante** se ve lo que Whisper va entendiendo: el visor
+  manda el audio en trozos de ¼ s y el servidor devuelve una transcripción
+  parcial por pasada (~1 s cada una). La respuesta sale de la transcripción
+  final, al soltar el botón.
+- **Cada respuesta llega en un solo audio**, con un reproductor debajo del
+  texto: pausa y reanudar, detener, y una barra con el tiempo que se puede
+  arrastrar. Preguntar otra cosa o tocar el micrófono corta la que suena.
 
 El labio-sincronizado combina dos fuentes: los **tiempos** salen de la energía del
 audio real y las **formas de boca** del texto. Los visemas se reparten según

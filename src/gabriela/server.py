@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import logging
 
 from fastapi import FastAPI, WebSocket
@@ -74,15 +75,27 @@ def depuracion() -> FileResponse:
     return FileResponse(WEB / "debug.html")
 
 
-def _habla(texto: str, pcm: bytes, *, fin: bool) -> dict:
-    """Un mensaje de voz: audio y boca para un trozo de frase."""
+def _habla(partes: list[tuple[str, bytes]]) -> dict:
+    """La respuesta entera como un solo audio, con la boca de cada frase
+    corrida a donde empieza esa frase.
+
+    Se graban por frase, pero se mandan juntas: el reproductor del visor
+    muestra el tiempo de la respuesta completa, y pausar o adelantar en un
+    solo audio es trivial; en una cola de frases, no.
+    """
+    pcm, visemas, inicio = b"", [], 0.0
+    for frase, trozo in partes:
+        visemas += [[round(inicio + t, 3), v, round(w, 3)]
+                    for t, v, w in timeline(trozo, frase, SAMPLE_RATE)]
+        pcm += trozo
+        inicio += len(trozo) / 2 / SAMPLE_RATE
     return {
         "tipo": "habla",
-        "texto": texto,
+        "texto": " ".join(f for f, _ in partes),
         "audio": base64.b64encode(a_wav(pcm)).decode(),
-        "visemas": [[round(t, 3), v, round(w, 3)]
-                    for t, v, w in timeline(pcm, texto, SAMPLE_RATE)],
-        "fin": fin,
+        "visemas": visemas,
+        "duracion": round(inicio, 3),
+        "fin": True,
         "relleno": False,
     }
 
@@ -95,35 +108,63 @@ async def _responder(ws: WebSocket, dicho: str) -> None:
         entender.elegir, dicho, grabadas)
     partes = grabadas.get(pregunta) or respaldo()
     texto = " ".join(f for f, _ in partes) or RESPALDO
-    await ws.send_json({"tipo": "texto", "texto": texto, "partes": len(partes),
-                        "pregunta": pregunta})
-    if not partes:
+    await ws.send_json({"tipo": "texto", "texto": texto, "pregunta": pregunta})
+    if partes:
+        await ws.send_json(_habla(partes))
+    else:
         # Sin el respaldo grabado no hay voz que mandar: queda escrito.
         await ws.send_json({"tipo": "error", "texto": texto})
-    for i, (frase, pcm) in enumerate(partes):
-        await ws.send_json(_habla(frase, pcm, fin=i == len(partes) - 1))
+
+
+async def _parcial(ws: WebSocket, pcm: bytes) -> None:
+    """Lo que Whisper entiende de lo grabado hasta ahora, para mostrarlo
+    mientras el visitante sigue hablando."""
+    if texto := await asyncio.to_thread(entender.transcribir, pcm):
+        await ws.send_json({"tipo": "parcial", "texto": texto})
 
 
 @app.websocket("/ws")
 async def conversar(ws: WebSocket) -> None:
-    """Texto: una pregunta escrita o un badge. Binario: lo que dijo al
-    micrófono, PCM de 16 bits mono a 16 kHz."""
+    """Mensajes de texto, en JSON:
+
+    - `{"tipo": "pregunta", "texto": …}`: escrita, o un badge.
+    - `{"tipo": "fin"}`: el visitante terminó de hablar al micrófono.
+
+    Mensajes binarios: trozos de lo que va diciendo, PCM de 16 bits mono a
+    16 kHz. Mientras llegan se transcribe lo acumulado y se devuelve como
+    `parcial`; con `fin` se transcribe entero y se responde.
+    """
     await ws.accept()
     # Sólo se ofrecen las que están grabadas: un badge que lleva a una respuesta
     # a medio grabar es peor que no ofrecerlo.
     await ws.send_json({"tipo": "listo", "visemas": VISEMAS,
                         "frecuentes": list(frecuentes())})
+    voz = bytearray()
+    parcial: asyncio.Task | None = None
     while True:
         m = await ws.receive()
         if m["type"] == "websocket.disconnect":
             return
         try:
             if m.get("bytes"):
+                voz += m["bytes"]
+                # ponytail: se transcribe todo lo acumulado, una pasada tras
+                # otra, sin esperar. Con 8 s de tope y whisper-small son ~1 s
+                # por pasada; con grabaciones largas habría que transcribir
+                # sólo la cola.
+                if parcial is None or parcial.done():
+                    parcial = asyncio.create_task(_parcial(ws, bytes(voz)))
+                continue
+            msg = json.loads(m.get("text") or "{}")
+            if msg.get("tipo") == "fin":
+                if parcial:
+                    await parcial  # que su texto no llegue después del final
+                pcm, voz = bytes(voz), bytearray()
                 await ws.send_json({"tipo": "pensando"})
-                dicho = await asyncio.to_thread(entender.transcribir, m["bytes"])
+                dicho = await asyncio.to_thread(entender.transcribir, pcm)
                 await ws.send_json({"tipo": "oido", "texto": dicho})
             else:
-                dicho = (m.get("text") or "").strip()
+                dicho = (msg.get("texto") or "").strip()
                 if not dicho:
                     continue
             await _responder(ws, dicho)

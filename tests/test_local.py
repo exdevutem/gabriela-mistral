@@ -370,6 +370,25 @@ def test_el_silencio_no_llega_a_whisper():
     assert e.elegir("   ", set()) is None
 
 
+def test_la_respuesta_va_en_un_audio_con_la_boca_en_su_sitio():
+    # El reproductor muestra el tiempo de la respuesta entera, así que las
+    # frases se mandan juntas. Si la boca de la segunda no se corriera a donde
+    # empieza la segunda, ella la diría con la boca de la primera.
+    import base64
+    import io
+
+    from gabriela.server import _habla
+
+    un_segundo = (np.sin(np.arange(SAMPLE_RATE) / 3) * 9000).astype("<i2").tobytes()
+    m = _habla([("Ma.", un_segundo), ("Pa.", un_segundo)])
+    with wave.open(io.BytesIO(base64.b64decode(m["audio"]))) as w:
+        assert w.getnframes() == 2 * SAMPLE_RATE, "se perdió o sobró audio"
+    assert m["duracion"] == 2.0 and m["fin"], m["duracion"]
+    tiempos = [t for t, _, _ in m["visemas"]]
+    assert tiempos == sorted(tiempos), "la boca retrocede"
+    assert any(t >= 1.0 for t in tiempos), "la segunda frase quedó sin boca"
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

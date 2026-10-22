@@ -45,16 +45,25 @@
                    border: 1px solid #352d28; cursor: pointer; }
   #badges button:hover:not(:disabled) { color: var(--tinta); border-color: #7a6a55; }
   #badges button:focus-visible { outline: 2px solid #7a6a55; outline-offset: 1px; }
-  /* Late mientras se genera la voz: medio minuto de página quieta se lee como
-     que el programa murió, justo cuando más está trabajando. */
-  #progreso { margin: 0; min-height: 1.4em; font-size: .85rem; color: var(--tenue);
-              font-style: italic; }
-  #progreso:not(:empty)::after {
-    content: '·'; margin-left: .35em; animation: latido 1.2s steps(1) infinite;
-  }
+  /* Reproductor de la respuesta: pausa, detener y una barra que se puede
+     arrastrar, con el tiempo al lado. */
+  #reproductor { display: flex; align-items: center; gap: .6rem; }
+  #reproductor[hidden] { display: none; }
+  #reproductor button { padding: .35rem .7rem; min-width: 2.6rem; font-size: .9rem;
+                        background: transparent; color: var(--tinta);
+                        border: 1px solid #352d28; }
+  #reproductor button:hover { border-color: #7a6a55; }
+  #reproductor button:focus-visible { outline: 2px solid #7a6a55; outline-offset: 1px; }
+  #barra { flex: 1; accent-color: #7a6a55; min-width: 0; }
+  #tiempo { font-size: .82rem; color: var(--tenue); font-variant-numeric: tabular-nums;
+            white-space: nowrap; }
+  /* Lo que va entendiendo mientras el visitante habla. */
+  #dicho.escuchando { color: var(--tenue); }
+  #dicho.escuchando::after { content: ' ●'; color: #a5523f;
+                             animation: latido 1.2s steps(1) infinite; }
   @keyframes latido { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .15; } }
   @media (prefers-reduced-motion: reduce) {
-    #progreso::after { animation: none; }
+    #dicho.escuchando::after { animation: none; }
   }
 </style>
 </head>
@@ -62,7 +71,13 @@
   <canvas id="lienzo" aria-label="Retrato animado de Gabriela Mistral"></canvas>
   <div id="pie">
     <p id="dicho" role="status" aria-live="polite"></p>
-    <p id="progreso" role="status" aria-live="polite"></p>
+    <div id="reproductor" role="group" aria-label="Reproducción de la respuesta" hidden>
+      <button id="pausa" type="button" aria-label="Pausar">❚❚</button>
+      <button id="detener" type="button" aria-label="Detener">■</button>
+      <input id="barra" type="range" min="0" max="0" step="0.1" value="0"
+             aria-label="Avance de la respuesta">
+      <span id="tiempo">0:00 / 0:00</span>
+    </div>
     <div id="badges" role="group" aria-label="Preguntas frecuentes"></div>
     <form id="forma">
       <input id="entrada" autocomplete="off" autofocus
@@ -80,7 +95,6 @@ import { crearAvatar } from './static/avatar.js';
 const dicho = document.getElementById('dicho');
 const entrada = document.getElementById('entrada');
 const enviar = document.getElementById('enviar');
-const progreso = document.getElementById('progreso');
 const forma = document.getElementById('forma');
 const badges = document.getElementById('badges');
 const microfono = document.getElementById('microfono');
@@ -116,7 +130,7 @@ function conectar() {
   ws.onclose = () => {
     dicho.className = 'error';
     dicho.textContent = 'Se cortó la conexión con el servidor. Reconectando…';
-    esperadas = 0; avance(); ocupado(true);
+    ocupado(true);
     setTimeout(conectar, Math.min(1000 * 2 ** reintentos++, 15000));
   };
 }
@@ -127,14 +141,41 @@ const ocupado = (si) => {
 };
 ocupado(true);
 
-// La voz tarda medio minuto en generarse. Sin decir en qué va, la página
-// parece colgada justo cuando más está trabajando.
-let esperadas = 0, llegadas = 0;
-function avance() {
-  if (!esperadas || llegadas >= esperadas) { progreso.textContent = ''; return; }
-  progreso.textContent = llegadas
-    ? `preparando la voz… ${llegadas} de ${esperadas}`
-    : 'preparando la voz…';
+// --- Reproductor ---
+// Todo lo lee y lo manda al <audio> del avatar: pausar, reanudar y adelantar
+// son los del elemento tal cual. Aparece cuando llega una respuesta y se va
+// cuando termina o se detiene; el silencio con que se desbloquea el audio no
+// cuenta como respuesta, y por eso no se muestra solo con 'play'.
+const reproductor = document.getElementById('reproductor');
+const pausa = document.getElementById('pausa');
+const detener = document.getElementById('detener');
+const barra = document.getElementById('barra');
+const tiempo = document.getElementById('tiempo');
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+let arrastrando = false;
+
+function pintar() {
+  const a = avatar?.audio;
+  if (!a || reproductor.hidden) return;
+  const total = Number.isFinite(a.duration) ? a.duration : 0;
+  if (!arrastrando) barra.value = a.currentTime;
+  barra.max = total;
+  tiempo.textContent = `${mmss(arrastrando ? barra.value : a.currentTime)} / ${mmss(total)}`;
+  const pausado = a.paused;
+  pausa.textContent = pausado ? '▶' : '❚❚';
+  pausa.setAttribute('aria-label', pausado ? 'Reanudar' : 'Pausar');
+}
+function ocultarReproductor() { reproductor.hidden = true; }
+
+if (avatar) {
+  const a = avatar.audio;
+  for (const ev of ['timeupdate', 'play', 'pause', 'loadedmetadata']) a.addEventListener(ev, pintar);
+  a.addEventListener('ended', ocultarReproductor);
+  a.addEventListener('detenido', ocultarReproductor);
+  pausa.onclick = () => (a.paused ? a.play() : a.pause());
+  detener.onclick = () => avatar.detener();
+  barra.oninput = () => { arrastrando = true; pintar(); };
+  barra.onchange = () => { a.currentTime = Number(barra.value); arrastrando = false; pintar(); };
 }
 
 function alMensaje({ data }) {
@@ -156,8 +197,12 @@ function alMensaje({ data }) {
     }
     ocupado(false);
   }
-  if (m.tipo === 'pensando') { esperadas = 0; llegadas = 0; }
   if (m.tipo === 'pensando') { dicho.className = 'pensando'; dicho.textContent = 'pensando…'; }
+  if (m.tipo === 'parcial' && grabando) {
+    // Lo que Whisper va entendiendo mientras el visitante todavía habla.
+    dicho.className = 'escuchando';
+    dicho.textContent = `«${m.texto}…»`;
+  }
   if (m.tipo === 'oido')     {
     // Lo que entendió Whisper, mientras se elige la respuesta: si contesta
     // otra cosa, el visitante ve por qué.
@@ -167,22 +212,22 @@ function alMensaje({ data }) {
   if (m.tipo === 'texto')    {
     dicho.className = '';
     dicho.textContent = m.texto;
-    esperadas = m.partes; llegadas = 0; avance();
   }
   if (m.tipo === 'habla')    {
-    // Llega una frase por mensaje, según el servidor las va sintetizando. La
-    // entrada no se libera hasta la última: mientras habla, no toca interrumpir.
+    // La respuesta entera en un audio. Una nueva corta a la anterior: se puede
+    // preguntar otra cosa sin esperar a que termine.
+    avatar?.detener();
+    reproductor.hidden = !avatar;
     // Si el navegador bloquea la reproducción automática, la boca se movería en
     // silencio y nadie sabría por qué. Mejor decirlo.
-    (avatar?.hablar(m.audio, m.visemas, m.relleno) ?? Promise.resolve()).catch(() => {
+    (avatar?.hablar(m.audio, m.visemas) ?? Promise.resolve()).catch(() => {
       dicho.textContent += '\n\n(El navegador bloqueó el audio: haz clic en la página y vuelve a preguntar.)';
     });
-    if (!m.relleno) { llegadas++; avance(); }
-    if (m.fin) ocupado(false);
+    ocupado(false);
   }
   if (m.tipo === 'error')    {
     dicho.className = 'pensando'; dicho.textContent = m.texto;
-    esperadas = 0; avance(); ocupado(false);
+    ocupado(false);
   }
 };
 conectar();
@@ -194,7 +239,7 @@ conectar();
  */
 function preguntar(texto) {
   avatar?.desbloquear();
-  ws.send(texto);
+  ws.send(JSON.stringify({ tipo: 'pregunta', texto }));
   entrada.value = '';
   ocupado(true);
 }
@@ -202,18 +247,31 @@ function preguntar(texto) {
 // --- Micrófono ---
 // Se toca una vez para hablar y otra para terminar; a los SEGUNDOS_MAX se corta
 // solo, para que un botón olvidado no deje el kiosco escuchando la sala.
-// Se manda PCM de 16 bits a 16 kHz, que es lo que lee Whisper: convertirlo aquí
-// le ahorra al servidor depender de ffmpeg para entender webm u mp4.
+//
+// Lo grabado sale en trozos de ~¼ s mientras se habla, y el servidor devuelve
+// lo que Whisper va entendiendo: la transcripción en vivo. Va como PCM de 16
+// bits a 16 kHz, que es lo que lee Whisper; convertirlo aquí le ahorra al
+// servidor depender de ffmpeg.
 //
 // getUserMedia sólo existe en contexto seguro (https o localhost). Servido por
 // http desde otra máquina, el botón no aparece y quedan el texto y los badges.
 const SEGUNDOS_MAX = 8;
-let grabadora = null, corte = 0;
-if (navigator.mediaDevices?.getUserMedia) microfono.hidden = false;
+// Un AudioWorklet que sólo copia lo que oye al hilo principal. Inline para no
+// servir otro archivo.
+const CAPTURA = URL.createObjectURL(new Blob([`
+  registerProcessor('captura', class extends AudioWorkletProcessor {
+    process([entrada]) {
+      if (entrada[0]) this.port.postMessage(entrada[0].slice());
+      return true;
+    }
+  });`], { type: 'text/javascript' }));
+let grabando = null, corte = 0;
+if (navigator.mediaDevices?.getUserMedia && window.AudioWorkletNode) microfono.hidden = false;
 
 microfono.onclick = async () => {
-  if (grabadora) { grabadora.stop(); return; }
+  if (grabando) { terminar(); return; }
   avatar?.desbloquear();  // dentro del gesto, igual que preguntar()
+  avatar?.detener();      // que el micrófono no la oiga a ella
   let flujo;
   try {
     flujo = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -222,45 +280,58 @@ microfono.onclick = async () => {
     dicho.textContent = 'No tengo permiso para usar el micrófono.';
     return;
   }
-  const trozos = [];
-  grabadora = new MediaRecorder(flujo);
-  grabadora.ondataavailable = (e) => trozos.push(e.data);
-  grabadora.onstop = async () => {
-    clearTimeout(corte);
-    flujo.getTracks().forEach((t) => t.stop());
-    grabadora = null;
-    microfono.setAttribute('aria-pressed', 'false');
-    microfono.textContent = 'Hablarle';
-    ocupado(true);
-    try {
-      ws.send(await aPcm16k(new Blob(trozos)));
-    } catch (e) {
-      console.error(e);
-      dicho.className = 'error';
-      dicho.textContent = 'No pude leer lo que grabé. Inténtalo de nuevo.';
-      ocupado(false);
+  const ctx = new AudioContext();
+  await ctx.audioWorklet.addModule(CAPTURA);
+  const nodo = new AudioWorkletNode(ctx, 'captura');
+  ctx.createMediaStreamSource(flujo).connect(nodo);
+  let pendiente = [], muestras = 0;
+  nodo.port.onmessage = ({ data }) => {
+    pendiente.push(data);
+    muestras += data.length;
+    if (muestras >= ctx.sampleRate / 4) {
+      ws.send(a16k(pendiente, ctx.sampleRate));
+      pendiente = []; muestras = 0;
     }
   };
-  grabadora.start();
+  grabando = { flujo, ctx, enviarResto: () => pendiente.length && ws.send(a16k(pendiente, ctx.sampleRate)) };
+  for (const b of badges.children) b.disabled = true;
+  enviar.disabled = true; entrada.disabled = true;
   microfono.setAttribute('aria-pressed', 'true');
   microfono.textContent = 'Escuchando… toca para terminar';
-  dicho.className = 'pensando';
-  dicho.textContent = 'Te escucho.';
-  corte = setTimeout(() => grabadora?.stop(), SEGUNDOS_MAX * 1000);
+  dicho.className = 'escuchando';
+  dicho.textContent = 'Te escucho';
+  corte = setTimeout(terminar, SEGUNDOS_MAX * 1000);
 };
 
-async function aPcm16k(blob) {
-  const ctx = new AudioContext();
-  const audio = await ctx.decodeAudioData(await blob.arrayBuffer());
+function terminar() {
+  if (!grabando) return;
+  clearTimeout(corte);
+  const { flujo, ctx, enviarResto } = grabando;
+  grabando = null;
+  enviarResto();
+  flujo.getTracks().forEach((t) => t.stop());
   ctx.close();
-  const off = new OfflineAudioContext(1, Math.ceil(audio.duration * 16000), 16000);
-  const fuente = off.createBufferSource();
-  fuente.buffer = audio;
-  fuente.connect(off.destination);
-  fuente.start();
-  const x = (await off.startRendering()).getChannelData(0);
-  const pcm = new Int16Array(x.length);
-  for (let i = 0; i < x.length; i++) pcm[i] = Math.max(-1, Math.min(1, x[i])) * 32767;
+  ws.send(JSON.stringify({ tipo: 'fin' }));
+  microfono.setAttribute('aria-pressed', 'false');
+  microfono.textContent = 'Hablarle';
+  ocupado(true);
+}
+
+/** Trozos en float a la frecuencia del micrófono -> PCM de 16 bits a 16 kHz.
+ *  ponytail: interpolación lineal sin filtro antialias. Para voz y Whisper
+ *  alcanza; si alguna vez se oye metálico, un OfflineAudioContext remuestrea
+ *  con filtro. */
+function a16k(trozos, origen) {
+  const x = new Float32Array(trozos.reduce((n, t) => n + t.length, 0));
+  let i = 0;
+  for (const t of trozos) { x.set(t, i); i += t.length; }
+  const paso = origen / 16000, n = Math.floor(x.length / paso);
+  const pcm = new Int16Array(n);
+  for (let j = 0; j < n; j++) {
+    const p = j * paso, k = Math.floor(p), f = p - k;
+    const v = x[k] * (1 - f) + (x[k + 1] ?? x[k]) * f;
+    pcm[j] = Math.max(-1, Math.min(1, v)) * 32767;
+  }
   return pcm.buffer;
 }
 

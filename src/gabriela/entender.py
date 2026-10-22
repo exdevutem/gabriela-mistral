@@ -22,6 +22,7 @@ ninguna dependencia.
 from __future__ import annotations
 
 import logging
+import threading
 from functools import lru_cache
 
 import numpy as np
@@ -31,6 +32,9 @@ from .config import EMBEDDINGS_MODELO, FRECUENTES, UMBRAL, VARIANTES, WHISPER_MO
 log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16_000  # lo que espera Whisper, y lo que manda el visor
+# Un pipeline de transformers no es seguro entre hilos, y con la transcripción
+# en vivo hay varias pasadas por pregunta, más las de otras conexiones.
+_turno = threading.Lock()
 
 
 @lru_cache(maxsize=1)
@@ -48,8 +52,9 @@ def transcribir(pcm: bytes) -> str:
     # mejor no preguntarle.
     if len(x) < SAMPLE_RATE // 4 or float(np.sqrt((x**2).mean())) < 0.003:
         return ""
-    salida = _whisper()({"raw": x, "sampling_rate": SAMPLE_RATE},
-                        generate_kwargs={"language": "spanish", "task": "transcribe"})
+    with _turno:
+        salida = _whisper()({"raw": x, "sampling_rate": SAMPLE_RATE},
+                            generate_kwargs={"language": "spanish", "task": "transcribe"})
     return salida["text"].strip()
 
 
