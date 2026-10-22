@@ -16,7 +16,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import entender
+from . import entender, vivo
 from .config import ASSETS, RESPALDO, WEB
 from .visemes import VISEMAS, timeline
 from .voice import SAMPLE_RATE, a_wav, calentar, frecuentes, respaldo
@@ -26,6 +26,9 @@ log = logging.getLogger("gabriela")
 # Whisper ni qué respuesta eligió, que es lo primero que hay que mirar cuando
 # ella contesta otra cosa.
 logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
+# Tope de lo que se sintetiza de una vez: unos 40 s de voz. El servidor no es
+# un lector de libros, y un mensaje enorme ocuparía la GPU a todos los demás.
+MAX_DECIR = 600
 
 
 @contextlib.asynccontextmanager
@@ -37,7 +40,8 @@ async def ciclo(_app):
     alguien hablándole.
     """
     for nombre, paso in (("grabar las respuestas", calentar),
-                         ("cargar Whisper y el elector", entender.calentar)):
+                         ("cargar Whisper y el elector", entender.calentar),
+                         ("cargar la voz en vivo", vivo.calentar)):
         try:
             log.info("preparando: %s…", nombre)
             await asyncio.to_thread(paso)
@@ -75,7 +79,8 @@ def depuracion() -> FileResponse:
     return FileResponse(WEB / "debug.html")
 
 
-def _habla(partes: list[tuple[str, bytes]]) -> dict:
+def _habla(partes: list[tuple[str, bytes]], continuacion: bool = False,
+           fin: bool = True) -> dict:
     """La respuesta entera como un solo audio, con la boca de cada frase
     corrida a donde empieza esa frase.
 
@@ -95,7 +100,8 @@ def _habla(partes: list[tuple[str, bytes]]) -> dict:
         "audio": base64.b64encode(a_wav(pcm)).decode(),
         "visemas": visemas,
         "duracion": round(inicio, 3),
-        "fin": True,
+        "fin": fin,
+        "continuacion": continuacion,
         "relleno": False,
     }
 
@@ -116,6 +122,22 @@ async def _responder(ws: WebSocket, dicho: str) -> None:
         await ws.send_json({"tipo": "error", "texto": texto})
 
 
+async def _decir(ws: WebSocket, texto: str) -> None:
+    """Dice `texto` con su voz, sintetizada al momento.
+
+    Manda una `habla` por unidad según se sintetiza: el visor las encadena, así
+    que empieza a sonar la primera mientras se hacen las demás. De dónde sale el
+    texto (hoy, quien lo mande; mañana, el modelo conversacional) no es asunto
+    de este camino.
+    """
+    unidades = vivo.unidades(texto)
+    await ws.send_json({"tipo": "texto", "texto": " ".join(unidades)})
+    for i, frase in enumerate(unidades):
+        pcm = await asyncio.to_thread(vivo.sintetizar, frase)
+        await ws.send_json(_habla([(frase, pcm)], continuacion=i > 0,
+                                  fin=i == len(unidades) - 1))
+
+
 async def _parcial(ws: WebSocket, pcm: bytes) -> None:
     """Lo que Whisper entiende de lo grabado hasta ahora, para mostrarlo
     mientras el visitante sigue hablando."""
@@ -128,6 +150,7 @@ async def conversar(ws: WebSocket) -> None:
     """Mensajes de texto, en JSON:
 
     - `{"tipo": "pregunta", "texto": …}`: escrita, o un badge.
+    - `{"tipo": "decir", "texto": …}`: que lo diga con su voz, en vivo.
     - `{"tipo": "fin"}`: el visitante terminó de hablar al micrófono.
 
     Mensajes binarios: trozos de lo que va diciendo, PCM de 16 bits mono a
@@ -156,6 +179,10 @@ async def conversar(ws: WebSocket) -> None:
                     parcial = asyncio.create_task(_parcial(ws, bytes(voz)))
                 continue
             msg = json.loads(m.get("text") or "{}")
+            if msg.get("tipo") == "decir":
+                if texto := (msg.get("texto") or "").strip()[:MAX_DECIR]:
+                    await _decir(ws, texto)
+                continue
             if msg.get("tipo") == "fin":
                 if parcial:
                     await parcial  # que su texto no llegue después del final

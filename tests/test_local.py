@@ -389,6 +389,73 @@ def test_la_respuesta_va_en_un_audio_con_la_boca_en_su_sitio():
     assert any(t >= 1.0 for t in tiempos), "la segunda frase quedó sin boca"
 
 
+def test_la_voz_en_vivo_no_pierde_palabras_y_arranca_corto():
+    # La primera unidad es lo que hay que esperar para oírla: si fuera la frase
+    # entera, el primer sonido tardaría lo que tarde la más larga.
+    from gabriela.vivo import PRIMERA_MAX, unidades
+
+    texto = ("Nací en Vicuña, en el valle de Elqui, y fui maestra rural antes "
+             "que poeta. Enseñar es también una forma de cantar.")
+    partes = unidades(texto)
+    assert " ".join(partes).split() == texto.split(), partes
+    assert len(partes[0]) <= PRIMERA_MAX, partes[0]
+    assert unidades("Ay.") == ["Ay."], "una frase corta no se parte"
+    assert unidades("Hola, buenas tardes y bienvenidos.") == ["Hola, buenas tardes y bienvenidos."], \
+        "una coma temprana no debe dejar un trozo de dos palabras"
+
+
+def test_la_voz_en_vivo_repite_la_toma_mala_pero_no_la_corta():
+    import gabriela.vivo as vivo
+
+    llamadas, tomas = [], iter([_habla(110, 3.5), _habla(210, 3.5)])  # voz de hombre y luego la suya
+
+    def falsa(texto, temperatura, semilla):
+        llamadas.append((temperatura, semilla))
+        return np.frombuffer(next(tomas), "<i2").astype(np.float32) / 32768
+
+    originales = vivo._una_toma, vivo.voice._tono_referencia
+    vivo._una_toma, vivo.voice._tono_referencia = falsa, lambda: 210.0
+    try:
+        texto = "a" * 45
+        pcm = vivo.sintetizar(texto)
+        assert len(llamadas) == 2, llamadas
+        assert llamadas[1][0] < llamadas[0][0] and llamadas[1][1] != llamadas[0][1], llamadas
+        assert vivo.voice._puntuar(pcm, texto) > 0.6, "se quedó con la toma mala"
+        # una frase corta no se juzga: una sola toma, sea cual sea
+        llamadas.clear()
+        tomas = iter([_habla(110)])
+        vivo.sintetizar("Sí.")
+        assert len(llamadas) == 1, llamadas
+    finally:
+        vivo._una_toma, vivo.voice._tono_referencia = originales
+
+
+def test_decir_manda_una_habla_por_unidad_y_las_encadena():
+    # El visor corta lo que suena con cada `habla` salvo las continuaciones:
+    # si la segunda no lo fuera, pisaría a la primera.
+    import asyncio
+
+    import gabriela.server as server
+
+    mandados = []
+
+    class WS:
+        async def send_json(self, m):
+            mandados.append(m)
+
+    un_segundo = (np.sin(np.arange(SAMPLE_RATE) / 3) * 9000).astype("<i2").tobytes()
+    real = server.vivo.sintetizar
+    server.vivo.sintetizar = lambda frase: un_segundo
+    try:
+        asyncio.run(server._decir(WS(), "Primera frase de prueba. Segunda frase de prueba."))
+    finally:
+        server.vivo.sintetizar = real
+    hablas = [m for m in mandados if m["tipo"] == "habla"]
+    assert [m["continuacion"] for m in hablas] == [False, True], hablas
+    assert [m["fin"] for m in hablas] == [False, True]
+    assert mandados[0]["tipo"] == "texto"
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

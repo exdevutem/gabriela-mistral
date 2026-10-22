@@ -83,6 +83,41 @@ descarga solo la primera vez a la caché de Hugging Face. **Los dos son repos
 el entorno, o la descarga responde 403. Su licencia es la «NeuTTS Open License
 1.0» — léela antes de publicar el proyecto.
 
+### La voz en vivo (GPU)
+
+Lo que no está entre las frecuentes —y mañana, lo que escriba el modelo
+conversacional— se sintetiza al momento con `src/gabriela/vivo.py`: la misma
+NeuTTS y la misma `referencia.wav`, pero con el backbone en **GGUF sobre
+llama.cpp**, que usa la GPU (Metal en un Mac) o la CPU con kernels propios. Medido
+en un M5 con Metal, tras calentar: **factor de tiempo real 0,33** y el primer
+sonido de una respuesta de dos frases a los **1,4 s**. Con el backbone de
+transformers en MPS el factor era 1,08 (medido en un M2, ver `config.py`), es
+decir, no alcanzaba a hablar en vivo.
+
+El texto se parte en unidades (la primera, en su primera coma si es larga) y se
+manda una `habla` por unidad según se sintetiza; el visor las encadena, así que
+suena la primera mientras se hacen las demás. Cada toma se puntúa con el mismo
+juez que las grabadas y, si suena a otra voz, se repite más fría
+(`VIVO_INTENTOS`). Probada con una frase de 11 s: Whisper la transcribe tal cual y
+el tono cae a 8 Hz del de la referencia (nota 0,95).
+
+```bash
+brew install cmake                       # llama-cpp-python compila llama.cpp
+uv sync
+uv run pipeline/convertir_gguf.py        # una vez: crea assets/models/*.gguf (467 MB)
+uv run python -m gabriela.vivo "Hola, soy Lucila Godoy Alcayaga."   # mide la latencia
+```
+
+En la página, `/decir <texto>` en la caja de mensaje lo dice con la voz en vivo;
+por WebSocket es `{"tipo": "decir", "texto": "…"}`.
+
+`convertir_gguf.py` existe porque el GGUF oficial
+(`neuphonic/neutts-nano-spanish-q4-gguf`) es *gated* aparte del modelo base.
+Con ese acceso, `VIVO_GGUF=neuphonic/neutts-nano-spanish-q4-gguf` lo reemplaza y
+queda más pequeño y más rápido. **Sin probar todavía en el clúster**: la imagen
+de Docker no incluye `llama-cpp-python`, y sin él el servidor arranca igual pero
+`decir` responde con error.
+
 ## Puesta en marcha
 
 ```bash

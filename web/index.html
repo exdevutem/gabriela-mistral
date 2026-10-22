@@ -215,8 +215,9 @@ function alMensaje({ data }) {
   }
   if (m.tipo === 'habla')    {
     // La respuesta entera en un audio. Una nueva corta a la anterior: se puede
-    // preguntar otra cosa sin esperar a que termine.
-    avatar?.detener();
+    // preguntar otra cosa sin esperar a que termine. Las que vienen de la voz
+    // en vivo llegan por unidades, y las siguientes a la primera se encolan.
+    if (!m.continuacion) avatar?.detener();
     reproductor.hidden = !avatar;
     // Si el navegador bloquea la reproducción automática, la boca se movería en
     // silencio y nadie sabría por qué. Mejor decirlo.
@@ -239,7 +240,9 @@ conectar();
  */
 function preguntar(texto) {
   avatar?.desbloquear();
-  ws.send(JSON.stringify({ tipo: 'pregunta', texto }));
+  // «/decir …» prueba la voz en vivo: lo dice tal cual, sin elegir respuesta.
+  const decir = texto.match(/^\/decir\s+(.+)/s);
+  ws.send(JSON.stringify(decir ? { tipo: 'decir', texto: decir[1] } : { tipo: 'pregunta', texto }));
   entrada.value = '';
   ocupado(true);
 }
