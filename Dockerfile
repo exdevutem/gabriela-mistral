@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # FastAPI sirve el visor, la voz y los visemas. El texto lo escribe un proveedor
-# externo compatible con OpenAI (Groq por defecto) si hay LLM_API_KEY; si no, se
+# externo compatible con OpenAI (Gemini por defecto) si hay GEMINI_API_KEY; si no, se
 # levanta el llama-server que viene incluido y todo corre sin red. El segundo
 # modo cuesta 2,4 GB más de RAM.
 #

@@ -22,10 +22,10 @@ log = logging.getLogger("gabriela")
 
 @contextlib.asynccontextmanager
 async def ciclo(_app):
-    """Carga NeuTTS y lo hace hablar una vez antes de aceptar visitas.
+    """Prepara la voz antes de aceptar visitas.
 
-    Son ~1,5 GB de pesos más la primera inferencia, y de paso graba lo que se
-    dice sin pasar por el LLM: las muletillas y las respuestas frecuentes. Todo
+    Con NeuTTS son ~1,5 GB de pesos más la primera inferencia; con Gemini no hay
+    nada que cargar. En ambos casos graba lo que se dice sin pasar por el LLM: las muletillas y las respuestas frecuentes. Todo
     eso se paga aquí y no con el visitante delante.
     """
     try:

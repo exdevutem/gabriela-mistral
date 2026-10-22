@@ -10,7 +10,7 @@ mueve la cara mientras lo hace. Backend en Python, render en el navegador.
 ## Cómo funciona
 
 ```
-tu mensaje ──> Groq o llama.cpp ──> NeuTTS nano-spanish ──> PCM 24 kHz
+tu mensaje ──> Gemini o llama.cpp ──> Gemini TTS o NeuTTS ──> PCM 24 kHz
                                         │
                         envolvente RMS ─┴─ visemas del texto
                                         │
@@ -42,22 +42,36 @@ energía acumulada, no según tiempo, así que las pausas del TTS no desfasan la
 
 ## Requisitos
 
-La voz corre siempre en local. El texto puede venir de un proveedor externo
-compatible con OpenAI o de un modelo local; el código es el mismo.
+Por defecto el texto y la voz salen de **Google AI Studio** (API de Gemini), con
+los modelos más baratos: `gemini-3.1-flash-lite` para el chat y
+`gemini-3.8-flash-lite-tts` para la voz. Ambos entran en el nivel gratuito, que no
+pide tarjeta. Sin red, el texto puede venir de un llama.cpp local y la voz de
+NeuTTS (`VOZ_MOTOR=neutts`); el código es el mismo.
 
 - Python 3.13 y [uv](https://docs.astral.sh/uv/)
-- Una voz de referencia en `assets/voz/` (ver más abajo)
-- Para el texto, una de dos:
-  - una clave gratuita de [Groq](https://console.groq.com/keys) (sin tarjeta), o
-  - [llama.cpp](https://github.com/ggml-org/llama.cpp) (`brew install llama.cpp`)
-    con un GGUF instruct, si prefieres no depender de la red
+- Una clave gratuita de [Google AI Studio](https://aistudio.google.com/apikey)
+- Sólo para el modo local: [llama.cpp](https://github.com/ggml-org/llama.cpp)
+  (`brew install llama.cpp`) con un GGUF instruct, y una voz de referencia en
+  `assets/voz/` para NeuTTS (ver más abajo)
 
 ```bash
 uv sync
-cp .env.example .env    # y pega tu LLM_API_KEY
+cp .env.example .env    # y pega tu GEMINI_API_KEY
 ```
 
-### La voz
+**Ojo con el nivel gratuito**: Google usa lo que se le manda para mejorar sus
+productos, y aquí escriben visitantes de un museo. Los límites por minuto y por
+día no están publicados: se ven en AI Studio con la clave. El primer arranque
+graba ~90 frases (muletillas y frecuentes) y, si topa el límite por minuto,
+espera y sigue; si topa el diario, el siguiente arranque continúa donde quedó.
+
+Gemini TTS **no clona**: habla una voz prefabricada (`GEMINI_VOZ`, por defecto
+Gacrux, «madura») con el estilo que se le pide en `GEMINI_ESTILO`. La voz clonada
+de la referencia sólo suena con `VOZ_MOTOR=neutts` o `piper`. Lo grabado va a
+carpetas con sufijo por motor (`muletillas-gemini`, `frecuentes-gemini`) para no
+mezclar voces.
+
+### La voz en local (NeuTTS)
 
 NeuTTS no tiene voces prefabricadas: **clona** la que le des. Deja en `assets/voz/`
 un `referencia.wav` de 7–10 s de habla limpia y un `referencia.txt` con su
@@ -80,7 +94,7 @@ el entorno, o la descarga responde 403. Su licencia es la «NeuTTS Open License
 uv run uvicorn gabriela.server:app --port 8000
 ```
 
-Para usar un modelo local en lugar de Groq, deja `LLM_API_KEY` vacía, descomenta
+Para usar un modelo local en lugar de Gemini, deja `GEMINI_API_KEY` vacía, descomenta
 `LLM_URL` y `LLM_MODEL` en el `.env`, y levanta antes:
 
 ```bash
@@ -196,10 +210,14 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
 - **PyTorch sí llega, pero por la voz**: NeuTTS lo arrastra (~2,5 GB). El
   pipeline de la cabeza sigue sin tocarlo —lee FLAME con stubs propios—, así que
   quien solo construya el modelo no necesita instalarlo.
-- **Groq retira modelos cada pocos meses** (`llama-3.3-70b-versatile` murió en
-  agosto de 2026). Si el chat empieza a dar 404, lista los vivos con
-  `curl -s https://api.groq.com/openai/v1/models -H "Authorization: Bearer $LLM_API_KEY"`
-  y ajusta `LLM_MODEL`.
+- **Google retira modelos con fecha** ([deprecations](https://ai.google.dev/gemini-api/docs/deprecations)):
+  `gemini-3.1-flash-lite` se apaga el 7 de mayo de 2027 y su reemplazo es
+  `gemini-3.5-flash-lite`. Los TTS `*-preview-tts` mueren el 17 de noviembre de
+  2026. Si el chat da 404, ajusta `LLM_MODEL`.
+- **Los Gemini 3 piensan antes de contestar**, y lo pensado se descuenta del tope
+  de 90 tokens. `chat.py` manda `reasoning_effort: minimal` (`LLM_RAZONAMIENTO`);
+  con `gemini-2.5-flash-lite` —más barato, pero sólo para claves que ya lo
+  usaban— pon `none`, porque `minimal` le *encendería* el razonamiento.
 - **Elegir el GGUF**, si vas por local: en un M2 de 8 GB un 3B en Q4 convive con
   NeuTTS; un 7B no. Si el modelo razona (Qwen3 y parientes), `chat.py` le quita
   el bloque `<think>` antes de mandarlo al TTS, que si no lo leería en voz alta.

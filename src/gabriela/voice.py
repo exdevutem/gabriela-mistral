@@ -19,6 +19,10 @@ Sigue sin ser tiempo real: las muletillas hacen falta igual.
 
 Con VOZ_MOTOR=piper habla la voz propia afinada en Piper, que sí lo es:
 factor de tiempo real 0,022 en la CPU de un M5.
+
+Con VOZ_MOTOR=gemini, que es el valor por defecto, sintetiza el TTS de Google AI
+Studio: nada que cargar ni CPU que quemar, a cambio de red y de una voz
+prefabricada en vez de la clonada.
 """
 from __future__ import annotations
 
@@ -31,12 +35,19 @@ from functools import lru_cache
 
 import numpy as np
 
-from .config import (DEVICE, FRECUENTES, FRECUENTES_DIR, GRABADO_ACEPTABLE,
-                     GRABADO_INTENTOS, GRABADO_TEMPERATURA, MOTOR, MULETILLAS,
+from .config import (DEVICE, FRECUENTES, FRECUENTES_DIR, GEMINI_API_KEY,
+                     GEMINI_ESTILO, GEMINI_TTS_MODELO, GEMINI_VOZ,
+                     GRABADO_ACEPTABLE, GRABADO_INTENTOS, GRABADO_TEMPERATURA,
+                     MOTOR, MULETILLAS,
                      MULETILLAS_DIR, NEUTTS_CODEC, NEUTTS_REPO, PIPER_MODELO,
                      REF_AUDIO, REF_TEXTO, RMS_OBJETIVO, SEED, TEMPERATURA)
 
 log = logging.getLogger(__name__)
+
+
+class CuotaAgotada(RuntimeError):
+    """El nivel gratuito de Gemini dijo basta (429)."""
+
 
 SAMPLE_RATE = 24_000  # NeuCodec entrega 24 kHz, igual que el vocoder de F5
 SAMPLE_WIDTH = 2
@@ -169,8 +180,10 @@ def calentar() -> None:
     """
     if MOTOR == "neutts":
         _codigos_referencia()
-    if not grabar_muletillas() + grabar_frecuentes():
-        sintetizar("Ay.")  # nada que grabar: hay que calentar igual
+    # Si no había nada que grabar, hay que calentar igual. Gemini no tiene nada
+    # local que calentar, y la llamada costaría cuota.
+    if not grabar_muletillas() + grabar_frecuentes() and MOTOR != "gemini":
+        sintetizar("Ay.")
 
 
 def _grabar(directorio, textos: list[str]) -> int:
@@ -227,6 +240,10 @@ def _mejor_toma(texto: str) -> tuple[bytes, float]:
     Si ninguna toma llega, devuelve la menos mala y lo deja dicho en el log:
     esa frase hay que oírla y probablemente reescribirla.
     """
+    if MOTOR == "gemini":
+        # Una voz prefabricada no se va a otro hablante, y el juez compara con
+        # referencia.wav, que no es esta voz: repetir sólo gastaría cuota.
+        return _con_paciencia(texto), 1.0
     mejor, mejor_nota = b"", -1.0
     for intento in range(max(GRABADO_INTENTOS, 1)):
         # Semilla distinta en cada intento: con la fija, NeuTTS es determinista
@@ -241,6 +258,26 @@ def _mejor_toma(texto: str) -> tuple[bytes, float]:
         log.warning("la mejor de %d tomas de %r se quedó en %.2f: óyela",
                     max(GRABADO_INTENTOS, 1), texto, mejor_nota)
     return mejor, mejor_nota
+
+
+def _con_paciencia(texto: str, esperas=(30, 60, 120)) -> bytes:
+    """Sintetiza, y si el nivel gratuito topa su límite por minuto, espera y
+    reintenta. Sólo para grabar: nadie está esperando.
+
+    ponytail: esperas fijas en vez de leer el retryDelay del 429. Si tras la
+    última sigue en 429 es el tope diario, y se rinde: lo grabado queda en
+    disco y el siguiente arranque sigue donde se quedó.
+    """
+    import time
+
+    for espera in (*esperas, None):
+        try:
+            return sintetizar(texto)
+        except CuotaAgotada:
+            if espera is None:
+                raise
+            log.info("cuota de Gemini topada; espero %d s", espera)
+            time.sleep(espera)
 
 
 def _puntuar(pcm: bytes, texto: str) -> float:
@@ -510,8 +547,12 @@ def sintetizar(texto: str, temperatura: float | None = None,
     Piper no usa ninguno de los dos: su ruido sale distinto en cada llamada,
     así que repetir la frase ya da otra toma.
     """
-    x = _sintetizar_piper(texto) if MOTOR == "piper" else _sintetizar_neutts(
-        texto, temperatura, semilla)
+    if MOTOR == "gemini":
+        x = _sintetizar_gemini(texto)
+    elif MOTOR == "piper":
+        x = _sintetizar_piper(texto)
+    else:
+        x = _sintetizar_neutts(texto, temperatura, semilla)
     # Ninguno entrega al nivel de F5 y el de NeuTTS varía entre frases; sin
     # esto la muletilla suena a la mitad de volumen que la respuesta que la sigue.
     if len(x) and (rms := float(np.sqrt((x**2).mean()))):
@@ -530,6 +571,48 @@ def _sintetizar_piper(texto: str) -> np.ndarray:
         return np.zeros(0, np.float32)
     x = np.concatenate([t.audio_float_array for t in trozos_audio]).astype(np.float32)
     return resample_poly(x, SAMPLE_RATE, trozos_audio[0].sample_rate).astype(np.float32)
+
+
+def _sintetizar_gemini(texto: str) -> np.ndarray:
+    """Por la API de Gemini (Google AI Studio), con la Interactions API, que es
+    la que documenta hoy el TTS; la de generateContent quedó como legado.
+
+    Se pide `audio/l16` a 24 kHz: PCM de 16 bits mono y sin cabecera, justo lo
+    que usa todo lo demás. Sin pedirlo, los 3.8 devuelven un WAV entero.
+
+    No clona: habla una voz prefabricada (GEMINI_VOZ) y el estilo se le pide
+    con palabras (GEMINI_ESTILO).
+    """
+    import base64
+
+    import httpx
+
+    r = httpx.post(
+        "https://generativelanguage.googleapis.com/v1beta/interactions",
+        headers={"x-goog-api-key": GEMINI_API_KEY},
+        json={
+            "model": GEMINI_TTS_MODELO,
+            "input": [{"type": "user_input", "content": [{
+                "type": "text", "text": texto,
+                "annotations": [{"type": "speech_metadata", "style": GEMINI_ESTILO}],
+            }]}],
+            "response_format": {"type": "audio", "mime_type": "audio/l16",
+                                "sample_rate": SAMPLE_RATE},
+            "generation_config": {"speech_config": [{"voice": GEMINI_VOZ}]},
+        },
+        timeout=60,
+    )
+    if r.status_code == 429:
+        raise CuotaAgotada("Cuota de voz de Gemini agotada (429): " + r.text[:200])
+    if r.status_code >= 400:
+        raise RuntimeError(f"Gemini TTS respondió {r.status_code}: {r.text[:200]}")
+    audio = [c["data"] for paso in r.json().get("steps", [])
+             if paso.get("type") == "model_output"
+             for c in paso.get("content", []) if c.get("type") == "audio"]
+    if not audio:
+        raise RuntimeError(f"Gemini TTS no devolvió audio: {r.text[:200]}")
+    crudo = b"".join(base64.b64decode(d) for d in audio)
+    return np.frombuffer(crudo, dtype="<i2").astype(np.float32) / 32768
 
 
 def _sintetizar_neutts(texto: str, temperatura: float | None,

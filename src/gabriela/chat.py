@@ -1,11 +1,11 @@
-"""Conversación con un modelo local servido por llama.cpp, con la persona de Gabriela."""
+"""Conversación con Gemini (o un llama.cpp local), con la persona de Gabriela."""
 from __future__ import annotations
 
 import re
 
 import httpx
 
-from .config import LLM_API_KEY, LLM_MODEL, LLM_URL
+from .config import LLM_API_KEY, LLM_MODEL, LLM_RAZONAMIENTO, LLM_URL
 from .persona import SYSTEM
 
 
@@ -38,7 +38,7 @@ class Conversacion:
 
     def responder(self, texto: str) -> str:
         self._mensajes.append({"role": "user", "content": texto})
-        r = self._http.post(LLM_URL, json={
+        cuerpo = {
             "model": LLM_MODEL,
             "messages": self._mensajes,
             "temperature": 0.9,
@@ -49,18 +49,22 @@ class Conversacion:
             # porque ninguna de las dos basta sola —el modelo se pasa igual, y
             # cortar sin más deja la frase a medias—.
             "max_tokens": 90,
-        })
+        }
+        if LLM_RAZONAMIENTO:
+            cuerpo["reasoning_effort"] = LLM_RAZONAMIENTO
+        r = self._http.post(LLM_URL, json=cuerpo)
         if r.status_code == 429:
             # El nivel gratuito se agota. Decirlo por su nombre ahorra media hora
             # de buscar el fallo en otra parte.
             raise RuntimeError("Cuota del proveedor agotada (429). Espera o cambia de modelo.")
         if r.status_code == 404:
             raise RuntimeError(
-                f"El proveedor no conoce el modelo '{LLM_MODEL}' (404). Groq retira "
-                "modelos con frecuencia; lista los vivos y ajusta LLM_MODEL."
+                f"El proveedor no conoce el modelo '{LLM_MODEL}' (404). Google "
+                "retira modelos con fecha (ai.google.dev/gemini-api/docs/deprecations); "
+                "ajusta LLM_MODEL."
             )
         if r.status_code == 401:
-            raise RuntimeError("El proveedor rechazó la clave (401). Revisa LLM_API_KEY.")
+            raise RuntimeError("El proveedor rechazó la clave (401). Revisa GEMINI_API_KEY.")
         if r.status_code >= 400:
             raise RuntimeError(f"{LLM_URL} respondió {r.status_code}: {r.text[:200]}")
         eleccion = r.json()["choices"][0]

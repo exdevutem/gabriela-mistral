@@ -342,6 +342,7 @@ def test_se_repite_la_frase_hasta_que_sale_bien():
 
     real_s, voz.sintetizar = voz.sintetizar, falso
     real_t, voz._tono_referencia = voz._tono_referencia, lambda: 210.0
+    real_m, voz.MOTOR = voz.MOTOR, "neutts"  # el que clona y se puede ir a otra voz
     try:
         pcm, nota = voz._mejor_toma("a" * 26)
         assert pcm == tomas[2], "se quedó con una toma mala"
@@ -349,7 +350,7 @@ def test_se_repite_la_frase_hasta_que_sale_bien():
         assert len(semillas) == 3, f"debió parar en la buena, hizo {len(semillas)}"
         assert len(set(semillas)) == 3, f"semillas repetidas: {semillas}"
     finally:
-        voz.sintetizar, voz._tono_referencia = real_s, real_t
+        voz.sintetizar, voz._tono_referencia, voz.MOTOR = real_s, real_t, real_m
 
 
 def test_lo_que_sonaba_mal_se_rehace_y_lo_bueno_se_deja():
@@ -374,6 +375,7 @@ def test_lo_que_sonaba_mal_se_rehace_y_lo_bueno_se_deja():
         d = Path(tmp)
         real_s, voz.sintetizar = voz.sintetizar, falso
         real_t, voz._tono_referencia = voz._tono_referencia, lambda: 210.0
+        real_m, voz.MOTOR = voz.MOTOR, "neutts"
         try:
             # La primera ya está y suena a hombre; la segunda ya está y está bien.
             (d / "0-0.wav").write_bytes(voz.a_wav(_habla(110, len(frases[0]) / 13)))
@@ -389,7 +391,7 @@ def test_lo_que_sonaba_mal_se_rehace_y_lo_bueno_se_deja():
             hechas.clear()
             assert voz._grabar(d, [texto]) == 0 and not hechas, hechas
         finally:
-            voz.sintetizar, voz._tono_referencia = real_s, real_t
+            voz.sintetizar, voz._tono_referencia, voz.MOTOR = real_s, real_t, real_m
 
 
 
@@ -409,6 +411,65 @@ def test_piper_sale_a_24_khz_y_entera():
     finally:
         voz._piper = real
     assert len(x) == 2 * SAMPLE_RATE, f"{len(x)} muestras en vez de {2 * SAMPLE_RATE}"
+
+
+def test_gemini_pide_pcm_y_lo_decodifica_entero():
+    # La Interactions API devuelve el audio en base64 dentro de los pasos del
+    # modelo. Pedir otro formato (los 3.8 dan WAV por defecto) colaría la
+    # cabecera RIFF como un chasquido al principio de cada frase.
+    import base64
+    from types import SimpleNamespace
+
+    import httpx
+
+    import gabriela.voice as voz
+
+    pcm = (np.sin(np.linspace(0, 300, 24_000)) * 8000).astype("<i2").tobytes()
+    pedido = {}
+
+    def falso(url, headers, json, timeout):
+        pedido.update(json)
+        datos = {"steps": [{"type": "thinking"}, {"type": "model_output", "content": [
+            {"type": "audio", "data": base64.b64encode(pcm[:24_000]).decode()},
+            {"type": "audio", "data": base64.b64encode(pcm[24_000:]).decode()}]}]}
+        return SimpleNamespace(status_code=200, json=lambda: datos, text="")
+
+    real, httpx.post = httpx.post, falso
+    try:
+        x = voz._sintetizar_gemini("Hola.")
+    finally:
+        httpx.post = real
+    assert pedido["response_format"] == {"type": "audio", "mime_type": "audio/l16",
+                                         "sample_rate": 24_000}, pedido
+    assert len(x) == 24_000, f"{len(x)} muestras: se perdió o sobró audio"
+
+
+def test_gemini_graba_una_sola_toma_y_espera_la_cuota():
+    # Con Gemini el juez de tono no sirve —compara con referencia.wav, que es
+    # otra voz— y cada toma de más es cuota gratuita gastada. Un 429 al grabar
+    # se espera en vez de dejar la frecuente sin grabar.
+    import gabriela.voice as voz
+
+    llamadas = []
+
+    def falso(texto, temperatura=None, semilla=None):
+        llamadas.append(texto)
+        if len(llamadas) == 1:
+            raise voz.CuotaAgotada("429")
+        return b"\x01\x00" * 10
+
+    reales = voz.sintetizar, voz.MOTOR
+    voz.sintetizar, voz.MOTOR = falso, "gemini"
+    try:
+        pcm = voz._con_paciencia("Hola.", esperas=(0,))
+        assert pcm == b"\x01\x00" * 10 and len(llamadas) == 2, llamadas
+        llamadas.clear()
+        voz.sintetizar = lambda t, temperatura=None, semilla=None: llamadas.append(t) or b"\x00\x00"
+        assert voz._mejor_toma("Hola.") == (b"\x00\x00", 1.0)
+        assert len(llamadas) == 1, f"{len(llamadas)} tomas en vez de una"
+    finally:
+        voz.sintetizar, voz.MOTOR = reales
+
 
 if __name__ == "__main__":
     fallos = 0

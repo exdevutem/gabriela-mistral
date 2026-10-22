@@ -1,9 +1,10 @@
 # Despliegue en el cluster de exdev
 
-Una imagen, dos modos según haya o no `LLM_API_KEY`:
+Una imagen, dos modos según haya o no `GEMINI_API_KEY`:
 
-- **Con clave** (Groq por defecto): el texto lo escribe un proveedor externo y el
-  contenedor sólo carga NeuTTS. **~5 GB de RAM.** Es el modo recomendado.
+- **Con clave** (Google AI Studio por defecto): el texto y la voz salen de la API
+  de Gemini y el contenedor no carga modelos. Es el modo recomendado. Con
+  `VOZ_MOTOR=neutts` la voz vuelve a ser local: **~5 GB de RAM.**
 - **Sin clave**: se levanta el `llama-server` incluido y todo corre sin red.
   **~8 GB de RAM.** La salida si el nodo se queda sin internet.
 
@@ -97,7 +98,7 @@ lectura.
 
 ```bash
 docker run --rm -p 8000:8000 \
-  -e LLM_API_KEY="$LLM_API_KEY" \
+  -e GEMINI_API_KEY="$GEMINI_API_KEY" \
   -v gabriela-modelos:/modelos \
   -v "$PWD/assets/voz:/app/assets/voz:ro" \
   ghcr.io/exdevutem/gabriela-mistral:0.1.0
@@ -127,19 +128,24 @@ Variables que conviene fijar en el contenedor:
 
 | Variable | Por defecto | Para qué |
 |---|---|---|
-| `LLM_API_KEY` | vacío | Clave del proveedor. Vacía = modelo local. |
-| `LLM_MODEL` | `qwen/qwen3.8-27b` | Groq retira modelos cada pocos meses. |
-| `LLM_URL` | Groq | Otro proveedor compatible con OpenAI. |
+| `GEMINI_API_KEY` | vacío | Clave de Google AI Studio, para texto y voz. Vacía (y sin `LLM_API_KEY`) = modelo local. |
+| `LLM_API_KEY` | `GEMINI_API_KEY` | Clave de otro proveedor compatible con OpenAI. |
+| `LLM_MODEL` | `gemini-3.1-flash-lite` | Se apaga el 7-may-2027; pasar a `gemini-3.5-flash-lite`. |
+| `LLM_URL` | Gemini (compatible con OpenAI) | Otro proveedor compatible con OpenAI. |
+| `LLM_RAZONAMIENTO` | `minimal` con Gemini | `none` para `gemini-2.5-flash-lite`. |
+| `GEMINI_TTS_MODELO` | `gemini-3.8-flash-lite-tts` | El TTS más barato. |
+| `GEMINI_VOZ` | `Gacrux` | Voz prefabricada; también Sulafat o Vindemiatrix. |
+| `GEMINI_ESTILO` | maestra chilena mayor, pausada | Cómo se le pide que hable. |
 | `NEUTTS_DEVICE` | `cpu` en la imagen, `auto` fuera | `auto` elige mps si lo hay. |
 | `NEUTTS_RMS` | `0.09` | Volumen de salida. Súbelo si la sala es ruidosa. |
-| `HF_TOKEN` | vacío | **Obligatorio**: la voz vive en repos *gated*. |
+| `HF_TOKEN` | vacío | **Obligatorio con `VOZ_MOTOR=neutts`**: esa voz vive en repos *gated*. |
 | `LLM_CTX` | `2048` | Contexto del LLM. Subirlo cuesta RAM. |
 | `LLM_THREADS` | todos los núcleos | Hilos de llama.cpp. |
 | `LLM_GGUF` | `Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M` | Otro modelo. |
-| `VOZ_MOTOR` | `neutts` | `piper` usa la voz propia: más rápida que tiempo real en CPU. |
+| `VOZ_MOTOR` | `gemini` | `neutts` clona la referencia en local; `piper` usa la voz propia, más rápida que tiempo real en CPU. |
 | `PIPER_MODELO` | `assets/voz/piper/es_419-gabriela-medium.onnx` | Con su `.onnx.json` al lado; entra con el montaje de `assets/voz`. |
 | `MULETILLAS_DIR` | `/modelos/muletillas` | Dónde se graba el relleno hablado. Con otro motor se le suma `-<motor>`. |
-| `FRECUENTES_DIR` | `/modelos/frecuentes` | Dónde se graban las respuestas de los badges. |
+| `FRECUENTES_DIR` | `/modelos/frecuentes` | Dónde se graban las respuestas de los badges. Con otro motor se le suma `-<motor>`. |
 
 ## Cuánta RAM y CPU asignarle
 

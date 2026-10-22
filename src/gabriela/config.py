@@ -14,23 +14,56 @@ VOZ = ASSETS / "voz"
 # override: gana el .env del proyecto por sobre variables exportadas en el shell
 load_dotenv(ROOT / ".env", override=True)
 
+# --- Google AI Studio (API de Gemini) ---
+# Una sola clave para el texto y la voz. Se saca gratis y sin tarjeta en
+# https://aistudio.google.com/apikey. Ojo: en el nivel gratuito Google usa lo
+# que se le manda para mejorar sus productos, y aquí escriben visitantes.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
 # --- Chat: cualquier API compatible con OpenAI ---
-# Por defecto Groq, que tiene nivel gratuito sin tarjeta. Apuntando LLM_URL a un
-# llama-server local, el mismo código funciona sin cuenta ni internet: es la
+# Por defecto Gemini por su endpoint compatible con OpenAI. Apuntando LLM_URL a
+# un llama-server local, el mismo código funciona sin cuenta ni internet: es la
 # salida si el museo se queda sin red.
-LLM_URL = os.getenv("LLM_URL", "https://api.groq.com/openai/v1/chat/completions")
-# Groq retira modelos cada pocos meses (llama-3.3-70b-versatile murió en agosto
-# de 2026). Si empieza a responder 404, mira qué hay vivo con:
-#   curl -s https://api.groq.com/openai/v1/models -H "Authorization: Bearer $LLM_API_KEY"
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")
-LLM_API_KEY = os.getenv("LLM_API_KEY", "")  # vacío para un llama-server local
+LLM_URL = os.getenv("LLM_URL",
+                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+# El más barato al que llega una clave nueva (octubre de 2026: 0,25 / 1,50 USD
+# por millón de tokens de entrada / salida, y gratis en el nivel gratuito).
+# Google lo apaga el 7 de mayo de 2027; su reemplazo es gemini-3.5-flash-lite.
+# gemini-2.5-flash-lite es más barato aún, pero sólo para claves que ya lo
+# usaban: si la tuya llega, ponlo aquí junto con LLM_RAZONAMIENTO=none.
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.1-flash-lite")
+LLM_API_KEY = os.getenv("LLM_API_KEY") or GEMINI_API_KEY  # vacío para un llama-server local
+# Los Gemini 3 piensan antes de contestar y lo pensado se cobra y se descuenta
+# del tope de 90 tokens de chat.py: sin esto la respuesta sale cortada o vacía.
+# "minimal" es lo menos que admiten (no se puede apagar). En un 2.5, "none" sí
+# lo apaga, y "minimal" lo *encendería* con 1024 tokens. Vacío = no mandarlo,
+# que es lo que quiere cualquier proveedor que no sea Gemini.
+LLM_RAZONAMIENTO = os.getenv(
+    "LLM_RAZONAMIENTO", "minimal" if "generativelanguage" in LLM_URL else "")
 
 # --- Voz: qué motor habla en vivo ---
-# "neutts" clona desde la referencia y es lo probado. "piper" es la voz propia,
-# afinada con F5-TTS de maestra (pipeline/entrenar_piper.ipynb): corre más
-# rápido que tiempo real en CPU, que es lo que le falta al clúster. Queda en
-# neutts hasta que la de Piper se haya oído y medido.
-MOTOR = os.getenv("VOZ_MOTOR", "neutts")
+# "gemini" es el TTS de Google AI Studio: no carga pesos ni quema CPU, que es lo
+# que le faltaba al clúster, pero no clona —habla una voz prefabricada— y
+# necesita red. "neutts" clona desde la referencia y es lo probado en local.
+# "piper" es la voz propia afinada con F5-TTS de maestra
+# (pipeline/entrenar_piper.ipynb), más rápida que tiempo real en CPU.
+MOTOR = os.getenv("VOZ_MOTOR", "gemini")
+# --- Voz: Gemini TTS ---
+# El TTS más barato de la API (octubre de 2026: 6 USD por millón de tokens de
+# audio, ~0,0015 USD por 10 s; gratis en el nivel gratuito). Los *-preview-tts*
+# se apagan el 17 de noviembre de 2026: no volver a ellos.
+GEMINI_TTS_MODELO = os.getenv("GEMINI_TTS_MODELO", "gemini-3.8-flash-lite-tts")
+# Voz prefabricada. Las que mejor le van a una maestra mayor: Gacrux («madura»),
+# Sulafat («cálida»), Vindemiatrix («amable»). Lista completa en
+# ai.google.dev/gemini-api/docs/speech-generation
+GEMINI_VOZ = os.getenv("GEMINI_VOZ", "Gacrux")
+# El estilo se le pide con palabras. La edad y el género los pone la voz; el
+# acento no está garantizado —la API sólo dice «español»—, así que se pide.
+GEMINI_ESTILO = os.getenv(
+    "GEMINI_ESTILO",
+    "Mujer chilena mayor, maestra. Habla en español de Chile, pausada, grave "
+    "y cálida, sin dramatizar.")
+
 # El .onnx que exporta el notebook; su .onnx.json tiene que estar al lado.
 PIPER_MODELO = Path(os.getenv("PIPER_MODELO", VOZ / "piper" / "es_419-gabriela-medium.onnx"))
 
@@ -110,6 +143,10 @@ MULETILLAS = [
 # Lo que es opinión suya («eso es lo que no hay que hacerle a un niño») va en su
 # voz y se distingue de lo que es dato; los datos no se adornan.
 FRECUENTES_DIR = Path(os.getenv("FRECUENTES_DIR", VOZ / "frecuentes"))
+# Mismo sufijo que las muletillas: una respuesta grabada con otro motor hablaría
+# con otra voz que la de en vivo.
+if MOTOR != "neutts":
+    FRECUENTES_DIR = FRECUENTES_DIR.with_name(f"{FRECUENTES_DIR.name}-{MOTOR}")
 FRECUENTES = [
     # --- El museo ---
     ("¿Qué fue este edificio?",
