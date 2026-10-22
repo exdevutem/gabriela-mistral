@@ -308,3 +308,22 @@ GRABADO_ACEPTABLE = float(os.getenv("NEUTTS_ACEPTABLE", "0.6"))
 # las voces ajenas. A cambio la entonación es algo más plana, y por eso no se
 # toca la de en vivo —donde además no habría con qué comparar la toma.
 GRABADO_TEMPERATURA = float(os.getenv("NEUTTS_TEMPERATURA_GRABADA", "0.7"))
+
+# --- Voz en vivo (vivo.py) ---
+# Lo que no está entre las frecuentes se sintetiza al momento: NeuTTS con el
+# backbone en GGUF por llama.cpp (Metal en un Mac, CPU en el clúster) y la misma
+# referencia de siempre. Medido en un M5 con el f16: primer sonido a los 0,4 s y
+# factor de tiempo real 0,32. Con el backbone de transformers en MPS iba a 1,08.
+#
+# Ruta a un .gguf, o un repo de Hugging Face. El f16 lo genera
+# pipeline/convertir_gguf.py; el cuantizado oficial
+# (neuphonic/neutts-nano-spanish-q4-gguf) es gated aparte del modelo base.
+VIVO_GGUF = os.getenv("VIVO_GGUF", str(ASSETS / "models" / "neutts-nano-spanish-f16.gguf"))
+# "auto" = Metal si lo hay, si no CPU. Cualquier cosa distinta de "cpu" manda
+# las capas del backbone a la GPU (llama.cpp elige Metal o CUDA según cómo se
+# compiló); el codec corre en el mismo dispositivo con torch.
+VIVO_DEVICE = os.getenv("VIVO_DEVICE", "auto")
+# Si una toma en vivo puntúa menos que GRABADO_ACEPTABLE se repite, más fría,
+# hasta esta cantidad de veces en total. Cada repetición cuesta ~0,3 s por
+# segundo de audio; sin esto, la «voz de hombre» de NeuTTS llega al visitante.
+VIVO_INTENTOS = int(os.getenv("VIVO_INTENTOS", "3"))
