@@ -33,17 +33,22 @@ A_DLIB68 = [
 ]
 assert len(A_DLIB68) == 68, f"la tabla debe tener 68 puntos, tiene {len(A_DLIB68)}"
 
-# El contorno de mandíbula depende del ángulo de la foto: en un ajuste 3D
-# arrastra la forma hacia errores de perspectiva, así que se descarta.
-SIN_MANDIBULA = list(range(17, 68))
 
 
-# Por encima de este tamaño el detector pierde precisión y consume memoria de más.
+# Por encima de este tamaño el detector pierde precisión y consume memoria de más;
+# por debajo del mínimo no encuentra la cara: un recorte de 240 px de una foto de
+# prensa sólo se detecta ampliado al doble.
 LADO_MAXIMO = 1600
+LADO_MINIMO = 560
 
 
-def detectar(foto: Path, lado_maximo: int = LADO_MAXIMO) -> tuple[np.ndarray, np.ndarray]:
-    """Devuelve (478 puntos xyz en coordenadas de la imagen ORIGINAL, 52 blendshapes)."""
+def detectar(foto: Path, lado_maximo: int = LADO_MAXIMO,
+             confianza: float = 0.5) -> tuple[np.ndarray, np.ndarray]:
+    """Devuelve (478 puntos xyz en coordenadas de la imagen ORIGINAL, 52 blendshapes).
+
+    `confianza` baja hace falta en fotos de prensa granuladas o en tres cuartos:
+    con el 0,5 por defecto mediapipe se salta caras que están ahí.
+    """
     import mediapipe as mp
     from mediapipe.tasks.python import BaseOptions, vision
     from PIL import Image
@@ -60,12 +65,14 @@ def detectar(foto: Path, lado_maximo: int = LADO_MAXIMO) -> tuple[np.ndarray, np
     pil = Image.open(foto).convert("RGB")
     ancho, alto = pil.size
     escala = min(1.0, lado_maximo / max(ancho, alto))
-    if escala < 1.0:
+    escala = max(escala, LADO_MINIMO / max(ancho, alto))
+    if escala != 1.0:
         pil = pil.resize((round(ancho * escala), round(alto * escala)), Image.LANCZOS)
 
     opciones = vision.FaceLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=str(MODELO)),
-        output_face_blendshapes=True, num_faces=1)
+        output_face_blendshapes=True, num_faces=1,
+        min_face_detection_confidence=confianza, min_face_presence_confidence=confianza)
     with vision.FaceLandmarker.create_from_options(opciones) as detector:
         imagen = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(pil))
         r = detector.detect(imagen)

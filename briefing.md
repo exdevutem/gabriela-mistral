@@ -176,9 +176,10 @@ ejecutaba el viejo. Resuelto con `Cache-Control: no-store`.
 
 ## Límites actuales
 
-**De perfil no funciona.** La textura es proyectiva: solo vale para lo que la cámara
-veía. Los vértices que miran hacia atrás muestrean la cara por el otro lado. Para una
-conversación cara a cara alcanza; si se quiere permitir orbitar el modelo, se rompe.
+**De perfil, la foto se acaba.** La textura se hornea en un mapa cilíndrico: lo que
+la foto frontal ve sale de ella, y la nuca y los costados se rellenan con el tono del
+pelo o de la piel vecinos. Ya no aparece la cara reflejada en la nuca al orbitar,
+pero detrás de la oreja el pelo pasa de fotografía a tono liso.
 
 **La latencia la marca el TTS**, y sigue siendo **el problema abierto del
 proyecto**. El texto llega de Groq en menos de un segundo; la síntesis tarda

@@ -1,0 +1,14 @@
+{
+  "_leeme": "Anotado a mano: mediapipe no detecta caras de perfil puro. Coordenadas en píxeles de la propia foto. 'mira' es hacia dónde apunta la nariz en la imagen; 'filas' va de la frente al mentón, sin la línea del pelo ni la parte de abajo del mentón, donde el borde es casi horizontal y la diferencia por fila deja de medir nada; 'excluir' (opcional) son filas donde el borde no se ve contra el fondo. 'anclas' usa la numeración de 68 puntos de dlib: 27 entrecejo, 30 punta de la nariz, 33 subnasal, 36 y 48 comisuras del ojo y la boca del lado visible (fuera de la línea media: sin ellas el giro queda libre).",
+  "mistral-perfil-nationaalarchief.jpg": {
+    "mira": "derecha",
+    "filas": [150, 700],
+    "anclas": {
+      "27": [368, 392],
+      "30": [418, 513],
+      "33": [363, 543],
+      "36": [268, 368],
+      "48": [300, 597]
+    }
+  }
+}

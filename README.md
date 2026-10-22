@@ -133,12 +133,26 @@ pero impide automatizar la descarga. Deja en `assets/flame/`:
 ```bash
 uv run python pipeline/convert_flame.py --inspeccionar   # ver qué trae el .pkl
 uv run python pipeline/convert_flame.py                  # -> assets/flame/flame.npz
-uv run python pipeline/fit_face.py assets/fotos/mistral-1946-frontal.jpg --preview
+uv run python pipeline/fit_face.py assets/fotos/mistral-1946-frontal.jpg \
+    assets/fotos/mistral-1946-sanfrancisco.jpg assets/fotos/mistral-1946-truman.jpg \
+    assets/fotos/mistral-1946-microfono.jpg \
+    --perfiles assets/fotos/perfiles.json --preview
+uv run python pipeline/hair_volume.py assets/fotos/mistral-1946-frontal.jpg
 ```
 
-El `--preview` deja en `/tmp/ajuste.png` la comparación entre los landmarks de la
-foto (verde) y los del modelo ajustado (magenta). **Míralo antes de seguir**: si no
-se reconoce, sube `REGULARIZACION` en `fit_face.py` o consigue una foto mejor.
+Las fotos comparten una sola forma β; cada una aporta su cámara y su expresión,
+para que el ceño de una o la boca apretada de otra no se cuelen en la forma. La
+primera, frontal, es la referencia: de ella salen la textura y la silueta del
+cráneo. El perfil de `perfiles.json` va anotado a mano —mediapipe no ve caras de
+perfil— y aporta la silueta de frente, nariz, labios y mentón (`pipeline/perfil.py`).
+`hair_volume.py` se vuelve a correr porque guarda vértices absolutos, calculados
+con la forma anterior.
+
+El `--preview` deja en `/tmp/ajuste*.png` la comparación entre los landmarks de
+cada foto (verde) y los del modelo ajustado (magenta), y en
+`/tmp/ajuste-perfil-*.png` el borde medido del perfil contra la malla. **Míralos
+antes de seguir**: si no se reconoce, sube `REGULARIZACION` en `fit_face.py` o
+consigue una foto mejor.
 
 La referencia es `assets/fotos/mistral-1946-frontal.jpg` (1946, Marcos Chamúdez,
 dominio público): 170 px entre ojos y encuadre frontal, contra los 37 px de la
@@ -249,11 +263,11 @@ uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline
   peinado medida en la foto y se colorea aparte, lo que da volumen y un borde
   que sigue el nacimiento del pelo. Pero es un volumen liso: no hay raya, ondas
   ni mechones, y cubre las orejas más de lo que debería.
-- **De perfil no funciona.** La textura es proyectiva: sólo es válida para lo
-  que la cámara veía. Los vértices que miran hacia atrás muestrean la cara por
-  el otro lado, así que de frente se ve bien y girando el modelo no. Para el uso
-  previsto —una conversación cara a cara— alcanza, pero es el límite duro de
-  este enfoque.
+- **De perfil, la foto se acaba.** La textura se hornea en un mapa cilíndrico
+  (`pipeline/textura.py`): lo que la foto frontal ve sale de la foto, y la nuca,
+  la coronilla y los costados se rellenan con el gris del pelo o el tono de la
+  piel que los rodea. Girando el modelo ya no aparece la cara reflejada en la
+  nuca, pero detrás de la oreja el pelo pasa de fotografía a tono liso.
 - **Una sola foto**: la textura hereda la iluminación del original, con sus
   sombras horneadas. Por eso la escena se ilumina de forma plana: sumarle un
   esquema de tres puntos duplicaba las sombras.

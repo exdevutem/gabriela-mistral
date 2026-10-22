@@ -17,13 +17,21 @@ FLOAT, USHORT, UINT = 5126, 5123, 5125
 
 
 def _normales(v: np.ndarray, f: np.ndarray) -> np.ndarray:
-    n = np.zeros_like(v)
+    """Normales por vértice, soldando los vértices que ocupan la misma posición.
+
+    La costura de la textura duplica vértices (ver textura.py). Cada copia sólo
+    ve los triángulos de su lado, y sin soldarlas la nuca quedaba con un pliegue
+    de sombreado justo en la raya del medio.
+    """
+    _, soldado = np.unique(v.round(7), axis=0, return_inverse=True)
+    soldado = soldado.ravel()
+    n = np.zeros((soldado.max() + 1, 3))
     tri = v[f]
     cara = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
     for k in range(3):
-        np.add.at(n, f[:, k], cara)
+        np.add.at(n, soldado[f[:, k]], cara)
     largo = np.linalg.norm(n, axis=1, keepdims=True)
-    return n / np.where(largo == 0, 1, largo)
+    return (n / np.where(largo == 0, 1, largo))[soldado]
 
 
 def escribir_glb(
@@ -101,10 +109,10 @@ def escribir_glb(
         vistas.append(gl.BufferView(buffer=0, byteOffset=len(blob), byteLength=len(crudo)))
         blob += crudo
         imagenes.append(gl.Image(bufferView=len(vistas) - 1, mimeType="image/png"))
-        # CLAMP en los bordes: con el recorte ajustado a la cabeza, lo que hay al
-        # borde es piel o pelo, así que repetir es mejor que mostrar el fondo.
+        # En horizontal se repite: la textura envuelve la cabeza y los vértices
+        # duplicados de la costura llevan u > 1. En vertical, CLAMP.
         muestreadores.append(gl.Sampler(magFilter=9729, minFilter=9987,
-                                        wrapS=33071, wrapT=33071))
+                                        wrapS=10497, wrapT=33071))
         texturas.append(gl.Texture(sampler=0, source=0))
 
     modelo = gl.GLTF2(
@@ -173,13 +181,22 @@ if __name__ == "__main__":
     # rasgos.py se conserva para un acabado escultórico sin fotografía.
     from fit_face import proyectar
     from textura import preparar
-    imagen, uv = preparar(base, aj["camara"], FOTO, proyectar)
+    # Se hornea sobre la cara CON la expresión que tenía en la foto: con la cara
+    # neutra, las cejas o la comisura de la foto caen fuera de su sitio justo
+    # donde la expresión movía la malla.
+    en_foto = base if "psi" not in aj.files else evaluar(m, beta, psi=aj["psi"]) + desplazamiento
+    from hair_volume import peso_cuero
+    imagen, uv, indice, caras = preparar(en_foto, m["f"], aj["camara"], FOTO, proyectar,
+                                         pelo=peso_cuero(m))
+    base = base[indice]
+    morphs = {nombre: v[indice] for nombre, v in morphs.items()}
 
-    destino = escribir_glb(base, m["f"], morphs, raiz / "assets" / "gabriela.glb",
+    destino = escribir_glb(base, caras, morphs, raiz / "assets" / "gabriela.glb",
                            uv=uv, imagen=imagen)
     tam = destino.stat().st_size / 1e6
     print(f"{destino} ({tam:.1f} MB)")
-    print(f"  {len(base)} vértices, {len(m['f'])} caras, {len(morphs)} visemas")
+    print(f"  {len(base)} vértices ({len(base) - len(m['v_template'])} duplicados en la costura), "
+          f"{len(caras)} caras, {len(morphs)} visemas")
     for nombre, v in morphs.items():
         d = np.linalg.norm(v - base, axis=1).max() * 1000
         print(f"  {nombre:<4} desplazamiento máximo {d:5.1f} mm")
