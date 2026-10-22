@@ -45,6 +45,10 @@ REG_EXPRESION = 4.0
 # El contorno de mandíbula es el menos fiable de los 68 —mediapipe lo adivina y
 # FLAME lo ata a vértices fijos—, pero sin él nada fija el ancho de la cara y el
 # ajuste devuelve el óvalo estrecho de la cara media. Entra, con menos peso.
+# Se probó el contorno dinámico de FLAME (un anillo por giro de cabeza, como en
+# DECA) y empeora: el error de mandíbula sube de 4,7 a 5,7 mm en la frontal y de
+# 9 a 16 mm en la de Truman. Los puntos de mediapipe son vértices de su malla
+# densa, anatómicos, no de silueta: calzan con el anillo fijo.
 PESO_MANDIBULA = 0.5
 # Fotos de perfil (ver perfil.py): la silueta manda; las anclas, puestas a ojo,
 # sólo sostienen la cámara para que la silueta no se deslice a lo largo de sí misma.

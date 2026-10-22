@@ -36,8 +36,8 @@ ANCHO, ALTO = 2048, 1024
 # se usa tal cual; por debajo de OCULTO el píxel está tan de canto que es una
 # raya estirada, o directamente la pared del fondo, y se descarta. Entre ambos se
 # mezcla con el relleno para no dejar costura.
-VISIBLE = 0.45
-OCULTO = 0.20
+VISIBLE = 0.65
+OCULTO = 0.15
 
 
 def uv_cilindrica(v: np.ndarray, caras: np.ndarray):
