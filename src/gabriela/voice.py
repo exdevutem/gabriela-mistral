@@ -15,10 +15,14 @@ tras calentar:
 | una respuesta de ~9 s    | 30,0 s |     12,5 s |      9,1 s |
 | factor de tiempo real    |   4,08 |       1,37 |       1,08 |
 
-Sigue sin ser tiempo real: las muletillas hacen falta igual.
+No es tiempo real, y desde que no hay chat no hace falta: sólo graba, al
+arrancar, las respuestas que falten.
 
 Con VOZ_MOTOR=piper habla la voz propia afinada en Piper, que sí lo es:
 factor de tiempo real 0,022 en la CPU de un M5.
+
+Con VOZ_MOTOR=gemini graba con el TTS de Google AI Studio: una voz
+prefabricada en vez de la clonada, y en el nivel gratuito, 10 peticiones al día.
 """
 from __future__ import annotations
 
@@ -26,26 +30,29 @@ import io
 import json
 import logging
 import platform
+import time
 import wave
 from functools import lru_cache
 
 import numpy as np
 
-from .config import (DEVICE, FRECUENTES, FRECUENTES_DIR, GRABADO_ACEPTABLE,
-                     GRABADO_INTENTOS, GRABADO_TEMPERATURA, MOTOR, MULETILLAS,
-                     MULETILLAS_DIR, NEUTTS_CODEC, NEUTTS_REPO, PIPER_MODELO,
-                     REF_AUDIO, REF_TEXTO, RMS_OBJETIVO, SEED, TEMPERATURA)
+from .config import (DEVICE, FRECUENTES, FRECUENTES_DIR, GEMINI_API_KEY,
+                     GEMINI_ESTILO, GEMINI_TTS_MODELO, GEMINI_VOZ,
+                     GRABADO_ACEPTABLE, GRABADO_INTENTOS, GRABADO_TEMPERATURA,
+                     MOTOR, NEUTTS_CODEC, NEUTTS_REPO, PIPER_MODELO,
+                     REF_AUDIO, REF_TEXTO, RESPALDO, RESPALDO_DIR,
+                     RMS_OBJETIVO, SEED, TEMPERATURA)
 
 log = logging.getLogger(__name__)
+
+
+class CuotaAgotada(RuntimeError):
+    """El nivel gratuito de Gemini dijo basta (429)."""
+
 
 SAMPLE_RATE = 24_000  # NeuCodec entrega 24 kHz, igual que el vocoder de F5
 SAMPLE_WIDTH = 2
 MAX_BYTES = 135  # tope por trozo; ver trozos()
-# Tope para las frases de muletilla, más corto a propósito. Cuando llega la
-# respuesta, el visor descarta el relleno pendiente pero deja terminar el trozo
-# que está sonando: esa frase es el retraso máximo que el relleno puede costar.
-# Con 70 bytes son unos 5 s. Medido: la voz va a unos 13 caracteres por segundo.
-MAX_BYTES_MULETILLA = 70
 # A lo que habla ella, medido sobre lo grabado. Sirve para saber cuánto debería
 # durar un texto y notar una toma cortada o una que se fue a divagar.
 CARACTERES_POR_SEGUNDO = 13
@@ -161,16 +168,14 @@ def _codigos_referencia():
 
 
 def calentar() -> None:
-    """Prepara todo lo que no debe pagarse con el visitante delante.
+    """Graba lo que falte antes de aceptar visitas.
 
-    Cargar los pesos no basta: hay que codificar el audio de referencia y poner
-    en marcha los kernels de torch. Aquí se paga una vez, y de paso se graban
-    las muletillas que falten, que sirven de calentamiento.
+    Ya no hay síntesis en vivo, así que no hay nada que calentar: el modelo de
+    voz se carga sólo si falta alguna grabación, y si están todas, el arranque
+    se ahorra sus ~1,5 GB de RAM.
     """
-    if MOTOR == "neutts":
-        _codigos_referencia()
-    if not grabar_muletillas() + grabar_frecuentes():
-        sintetizar("Ay.")  # nada que grabar: hay que calentar igual
+    grabar_frecuentes()
+    grabar_respaldo()
 
 
 def _grabar(directorio, textos: list[str]) -> int:
@@ -227,6 +232,10 @@ def _mejor_toma(texto: str) -> tuple[bytes, float]:
     Si ninguna toma llega, devuelve la menos mala y lo deja dicho en el log:
     esa frase hay que oírla y probablemente reescribirla.
     """
+    if MOTOR == "gemini":
+        # Una voz prefabricada no se va a otro hablante, y el juez compara con
+        # referencia.wav, que no es esta voz: repetir sólo gastaría cuota.
+        return con_paciencia(texto), 1.0
     mejor, mejor_nota = b"", -1.0
     for intento in range(max(GRABADO_INTENTOS, 1)):
         # Semilla distinta en cada intento: con la fija, NeuTTS es determinista
@@ -241,6 +250,25 @@ def _mejor_toma(texto: str) -> tuple[bytes, float]:
         log.warning("la mejor de %d tomas de %r se quedó en %.2f: óyela",
                     max(GRABADO_INTENTOS, 1), texto, mejor_nota)
     return mejor, mejor_nota
+
+
+def con_paciencia(texto: str, esperas=(20, 20, 30, 60)) -> bytes:
+    """Sintetiza, y si el nivel gratuito topa su límite (3 peticiones por
+    minuto en el TTS), espera y reintenta. Sólo se usa para grabar: nadie está
+    esperando.
+
+    ponytail: esperas fijas en vez de leer el «retry in Ns» del 429. Si tras la
+    última sigue en 429 es el tope diario, y se rinde: lo grabado queda en
+    disco y el siguiente arranque sigue donde se quedó.
+    """
+    for espera in (*esperas, None):
+        try:
+            return sintetizar(texto)
+        except CuotaAgotada:
+            if espera is None:
+                raise
+            log.info("cuota de Gemini topada; espero %d s", espera)
+            time.sleep(espera)
 
 
 def _puntuar(pcm: bytes, texto: str) -> float:
@@ -425,24 +453,13 @@ def _leer(directorio, textos: list[str]) -> list[list[tuple[str, bytes]]]:
     return out
 
 
-def grabar_muletillas() -> int:
-    """Graba las muletillas que falten o que sonaran mal. Son textos fijos:
-    generarlos en cada pregunta sería añadir espera a la espera que vienen a
-    tapar.
-    """
-    grabados = _grabar(MULETILLAS_DIR, MULETILLAS)
-    if grabados:
-        muletillas.cache_clear()
-    return grabados
-
-
 def grabar_frecuentes() -> int:
     """Graba las respuestas a las preguntas frecuentes que falten o que
     sonaran mal.
 
-    Son 68 trozos la primera vez, unos cinco minutos más lo que cueste repetir
-    los que salgan mal. A cambio, un visitante que toca un badge oye la
-    respuesta al instante, sin pasar por el LLM y con la voz que corresponde.
+    Son unos 90 trozos la primera vez, unos siete minutos con NeuTTS más lo que
+    cueste repetir los que salgan mal. A cambio, un visitante que toca un badge oye la
+    respuesta al instante y con la voz que corresponde.
     """
     grabados = _grabar(FRECUENTES_DIR, [r for _, r in FRECUENTES])
     if grabados:
@@ -450,18 +467,24 @@ def grabar_frecuentes() -> int:
     return grabados
 
 
+def grabar_respaldo() -> int:
+    """Graba el «no te entendí» si falta."""
+    grabados = _grabar(RESPALDO_DIR, [RESPALDO])
+    if grabados:
+        respaldo.cache_clear()
+    return grabados
+
+
 @lru_cache(maxsize=1)
-def muletillas() -> list[list[tuple[str, bytes]]]:
-    """Las muletillas grabadas y completas. Cacheado: se consultan en cada
-    pregunta y son unos cientos de kB.
-    """
-    return [partes for partes in _leer(MULETILLAS_DIR, MULETILLAS) if partes]
+def respaldo() -> list[tuple[str, bytes]]:
+    """Lo que dice cuando no reconoce la pregunta, o [] si no está grabado."""
+    return _leer(RESPALDO_DIR, [RESPALDO])[0]
 
 
 @lru_cache(maxsize=1)
 def frecuentes() -> dict[str, list[tuple[str, bytes]]]:
     """Las frecuentes grabadas, por su pregunta. Sólo las completas: una a
-    medio grabar se responde mejor con el LLM que a medias.
+    medio grabar no se ofrece: sonaría cortada.
     """
     grabadas = _leer(FRECUENTES_DIR, [r for _, r in FRECUENTES])
     return {p: partes for (p, _), partes in zip(FRECUENTES, grabadas) if partes}
@@ -510,10 +533,14 @@ def sintetizar(texto: str, temperatura: float | None = None,
     Piper no usa ninguno de los dos: su ruido sale distinto en cada llamada,
     así que repetir la frase ya da otra toma.
     """
-    x = _sintetizar_piper(texto) if MOTOR == "piper" else _sintetizar_neutts(
-        texto, temperatura, semilla)
+    if MOTOR == "gemini":
+        x = _sintetizar_gemini(texto)
+    elif MOTOR == "piper":
+        x = _sintetizar_piper(texto)
+    else:
+        x = _sintetizar_neutts(texto, temperatura, semilla)
     # Ninguno entrega al nivel de F5 y el de NeuTTS varía entre frases; sin
-    # esto la muletilla suena a la mitad de volumen que la respuesta que la sigue.
+    # esto una respuesta suena a la mitad de volumen que la anterior.
     if len(x) and (rms := float(np.sqrt((x**2).mean()))):
         x = x * (RMS_OBJETIVO / rms)
     return (x.clip(-1, 1) * 32767).astype("<i2").tobytes()
@@ -530,6 +557,48 @@ def _sintetizar_piper(texto: str) -> np.ndarray:
         return np.zeros(0, np.float32)
     x = np.concatenate([t.audio_float_array for t in trozos_audio]).astype(np.float32)
     return resample_poly(x, SAMPLE_RATE, trozos_audio[0].sample_rate).astype(np.float32)
+
+
+def _sintetizar_gemini(texto: str) -> np.ndarray:
+    """Por la API de Gemini (Google AI Studio), con la Interactions API, que es
+    la que documenta hoy el TTS; la de generateContent quedó como legado.
+
+    Se pide `audio/l16` a 24 kHz: PCM de 16 bits mono y sin cabecera, justo lo
+    que usa todo lo demás. Sin pedirlo, los 3.8 devuelven un WAV entero.
+
+    No clona: habla una voz prefabricada (GEMINI_VOZ) y el estilo se le pide
+    con palabras (GEMINI_ESTILO).
+    """
+    import base64
+
+    import httpx
+
+    r = httpx.post(
+        "https://generativelanguage.googleapis.com/v1beta/interactions",
+        headers={"x-goog-api-key": GEMINI_API_KEY},
+        json={
+            "model": GEMINI_TTS_MODELO,
+            "input": [{"type": "user_input", "content": [{
+                "type": "text", "text": texto,
+                "annotations": [{"type": "speech_metadata", "style": GEMINI_ESTILO}],
+            }]}],
+            "response_format": {"type": "audio", "mime_type": "audio/l16",
+                                "sample_rate": SAMPLE_RATE},
+            "generation_config": {"speech_config": [{"voice": GEMINI_VOZ}]},
+        },
+        timeout=60,
+    )
+    if r.status_code == 429:
+        raise CuotaAgotada("Cuota de voz de Gemini agotada (429): " + r.text[:200])
+    if r.status_code >= 400:
+        raise RuntimeError(f"Gemini TTS respondió {r.status_code}: {r.text[:200]}")
+    audio = [c["data"] for paso in r.json().get("steps", [])
+             if paso.get("type") == "model_output"
+             for c in paso.get("content", []) if c.get("type") == "audio"]
+    if not audio:
+        raise RuntimeError(f"Gemini TTS no devolvió audio: {r.text[:200]}")
+    crudo = b"".join(base64.b64decode(d) for d in audio)
+    return np.frombuffer(crudo, dtype="<i2").astype(np.float32) / 32768
 
 
 def _sintetizar_neutts(texto: str, temperatura: float | None,
@@ -570,7 +639,7 @@ if __name__ == "__main__":
     p.add_argument("texto")
     p.add_argument("--out", default="/tmp/gabriela.wav")
     p.add_argument("--grabado", action="store_true",
-                   help="como se graban las muletillas y las frecuentes: varias "
+                   help="como se graban las respuestas: varias "
                         "tomas y se queda la mejor. Tarda más y suena mejor.")
     a = p.parse_args()
     if a.grabado:

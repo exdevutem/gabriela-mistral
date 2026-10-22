@@ -1,39 +1,49 @@
-"""Servidor: sirve el visor y responde por WebSocket con voz y visemas."""
+"""Servidor: sirve el visor y responde por WebSocket con voz y visemas.
+
+No hay chat. Lo que el visitante escribe o dice se compara con las preguntas
+frecuentes (entender.py) y suena la respuesta grabada que corresponda: siempre
+la misma, verificada y al instante.
+"""
 from __future__ import annotations
 
 import asyncio
 import base64
 import contextlib
+import json
 import logging
-import random
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .chat import Conversacion
-from .config import ASSETS, WEB
+from . import entender
+from .config import ASSETS, RESPALDO, WEB
 from .visemes import VISEMAS, timeline
-from .voice import (SAMPLE_RATE, a_wav, calentar, frecuentes, muletillas,
-                    sintetizar, trozos)
+from .voice import SAMPLE_RATE, a_wav, calentar, frecuentes, respaldo
 
 log = logging.getLogger("gabriela")
+# Uvicorn sólo configura sus propios loggers: sin esto no se ve qué entendió
+# Whisper ni qué respuesta eligió, que es lo primero que hay que mirar cuando
+# ella contesta otra cosa.
+logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
 
 
 @contextlib.asynccontextmanager
 async def ciclo(_app):
-    """Carga NeuTTS y lo hace hablar una vez antes de aceptar visitas.
+    """Graba lo que falte y carga Whisper antes de aceptar visitas.
 
-    Son ~1,5 GB de pesos más la primera inferencia, y de paso graba lo que se
-    dice sin pasar por el LLM: las muletillas y las respuestas frecuentes. Todo
-    eso se paga aquí y no con el visitante delante.
+    Grabar es largo sólo la primera vez (unos siete minutos con NeuTTS); después
+    queda en disco. Whisper y el elector son ~1,5 GB que no deben cargarse con
+    alguien hablándole.
     """
-    try:
-        log.info("calentando el modelo de voz…")
-        await asyncio.to_thread(calentar)
-        log.info("modelo de voz listo")
-    except Exception:
-        log.exception("no pude precalentar el modelo de voz")
+    for nombre, paso in (("grabar las respuestas", calentar),
+                         ("cargar Whisper y el elector", entender.calentar)):
+        try:
+            log.info("preparando: %s…", nombre)
+            await asyncio.to_thread(paso)
+        except Exception:
+            log.exception("no pude %s", nombre)
+    log.info("listo para visitas")
     yield
 
 
@@ -65,82 +75,100 @@ def depuracion() -> FileResponse:
     return FileResponse(WEB / "debug.html")
 
 
-def _habla(texto: str, pcm: bytes, *, fin: bool, relleno: bool = False) -> dict:
-    """Un mensaje de voz: audio y boca para un trozo de frase.
+def _habla(partes: list[tuple[str, bytes]]) -> dict:
+    """La respuesta entera como un solo audio, con la boca de cada frase
+    corrida a donde empieza esa frase.
 
-    `relleno` marca los trozos de muletilla: el visor los reproduce enteros,
-    pero no los cuenta en el «2 de 4» de la barra de avance, que habla de la
-    respuesta.
+    Se graban por frase, pero se mandan juntas: el reproductor del visor
+    muestra el tiempo de la respuesta completa, y pausar o adelantar en un
+    solo audio es trivial; en una cola de frases, no.
     """
+    pcm, visemas, inicio = b"", [], 0.0
+    for frase, trozo in partes:
+        visemas += [[round(inicio + t, 3), v, round(w, 3)]
+                    for t, v, w in timeline(trozo, frase, SAMPLE_RATE)]
+        pcm += trozo
+        inicio += len(trozo) / 2 / SAMPLE_RATE
     return {
         "tipo": "habla",
-        "texto": texto,
+        "texto": " ".join(f for f, _ in partes),
         "audio": base64.b64encode(a_wav(pcm)).decode(),
-        "visemas": [[round(t, 3), v, round(w, 3)]
-                    for t, v, w in timeline(pcm, texto, SAMPLE_RATE)],
-        "fin": fin,
-        "relleno": relleno,
+        "visemas": visemas,
+        "duracion": round(inicio, 3),
+        "fin": True,
+        "relleno": False,
     }
+
+
+async def _responder(ws: WebSocket, dicho: str) -> None:
+    """Hace sonar la frecuente que corresponde a `dicho`, o el respaldo."""
+    grabadas = frecuentes()
+    # Un badge manda la pregunta tal cual: no hace falta preguntarle a nadie.
+    pregunta = dicho if dicho in grabadas else await asyncio.to_thread(
+        entender.elegir, dicho, grabadas)
+    partes = grabadas.get(pregunta) or respaldo()
+    texto = " ".join(f for f, _ in partes) or RESPALDO
+    await ws.send_json({"tipo": "texto", "texto": texto, "pregunta": pregunta})
+    if partes:
+        await ws.send_json(_habla(partes))
+    else:
+        # Sin el respaldo grabado no hay voz que mandar: queda escrito.
+        await ws.send_json({"tipo": "error", "texto": texto})
+
+
+async def _parcial(ws: WebSocket, pcm: bytes) -> None:
+    """Lo que Whisper entiende de lo grabado hasta ahora, para mostrarlo
+    mientras el visitante sigue hablando."""
+    if texto := await asyncio.to_thread(entender.transcribir, pcm):
+        await ws.send_json({"tipo": "parcial", "texto": texto})
 
 
 @app.websocket("/ws")
 async def conversar(ws: WebSocket) -> None:
+    """Mensajes de texto, en JSON:
+
+    - `{"tipo": "pregunta", "texto": …}`: escrita, o un badge.
+    - `{"tipo": "fin"}`: el visitante terminó de hablar al micrófono.
+
+    Mensajes binarios: trozos de lo que va diciendo, PCM de 16 bits mono a
+    16 kHz. Mientras llegan se transcribe lo acumulado y se devuelve como
+    `parcial`; con `fin` se transcribe entero y se responde.
+    """
     await ws.accept()
-    charla = Conversacion()  # una conversación por conexión: el historial vive aquí
     # Sólo se ofrecen las que están grabadas: un badge que lleva a una respuesta
     # a medio grabar es peor que no ofrecerlo.
     await ws.send_json({"tipo": "listo", "visemas": VISEMAS,
                         "frecuentes": list(frecuentes())})
-    try:
-        while True:
-            pregunta = (await ws.receive_text()).strip()
-            if not pregunta:
+    voz = bytearray()
+    parcial: asyncio.Task | None = None
+    while True:
+        m = await ws.receive()
+        if m["type"] == "websocket.disconnect":
+            return
+        try:
+            if m.get("bytes"):
+                voz += m["bytes"]
+                # ponytail: se transcribe todo lo acumulado, una pasada tras
+                # otra, sin esperar. Con 8 s de tope y whisper-small son ~1 s
+                # por pasada; con grabaciones largas habría que transcribir
+                # sólo la cola.
+                if parcial is None or parcial.done():
+                    parcial = asyncio.create_task(_parcial(ws, bytes(voz)))
                 continue
-            # Una frecuente se responde con lo ya grabado: al instante, sin
-            # muletilla y sin pasar por el LLM. Es lo que hace que un badge
-            # valga la pena —y que las fechas que oiga el visitante sean las
-            # verificadas, no las que el modelo recuerde.
-            if partes := frecuentes().get(pregunta):
-                dicho = " ".join(f for f, _ in partes)
-                charla.anotar(pregunta, dicho)
-                await ws.send_json({"tipo": "texto", "texto": dicho,
-                                    "partes": len(partes)})
-                for i, (frase, pcm) in enumerate(partes):
-                    await ws.send_json(
-                        _habla(frase, pcm, fin=i == len(partes) - 1))
-                continue
-
-            await ws.send_json({"tipo": "pensando"})
-            # Una muletilla ya grabada, de inmediato: la síntesis de verdad
-            # tarda sus segundos, y una estatua muda se lee como que el programa
-            # se colgó. Va entera —cuenta algo del museo y cortarla dejaría la
-            # información a medias—, troceada por frases para que empiece a
-            # sonar cuanto antes. La respuesta se sintetiza mientras tanto y
-            # espera su turno en la cola del visor.
-            relleno = muletillas()
-            if relleno:
-                for frase, pcm in random.choice(relleno):
-                    await ws.send_json(_habla(frase, pcm, fin=False, relleno=True))
-            try:
-                # En hilo aparte: quema CPU y en el bucle de eventos congelaría
-                # al resto de conexiones.
-                texto = await asyncio.to_thread(charla.responder, pregunta)
-                partes = trozos(texto)
-                # `partes` viaja con el texto para que la interfaz pueda decir
-                # "preparando la voz, 2 de 3" en vez de un girador sin fondo.
-                await ws.send_json({"tipo": "texto", "texto": texto,
-                                    "partes": len(partes)})
-                # Frase a frase: la síntesis tarda varias veces el tiempo del
-                # audio que produce, así que esperar a tenerlo todo son minutos
-                # de silencio. Mandando cada trozo en cuanto está, ella empieza
-                # a hablar mientras se generan los siguientes.
-                for i, parte in enumerate(partes):
-                    pcm = await asyncio.to_thread(sintetizar, parte)
-                    await ws.send_json(_habla(parte, pcm, fin=i == len(partes) - 1))
-            except Exception:
-                log.exception("falló la respuesta")
-                await ws.send_json({"tipo": "error",
-                                    "texto": "No pude responder. Inténtalo de nuevo."})
-                continue
-    except WebSocketDisconnect:
-        pass
+            msg = json.loads(m.get("text") or "{}")
+            if msg.get("tipo") == "fin":
+                if parcial:
+                    await parcial  # que su texto no llegue después del final
+                pcm, voz = bytes(voz), bytearray()
+                await ws.send_json({"tipo": "pensando"})
+                dicho = await asyncio.to_thread(entender.transcribir, pcm)
+                await ws.send_json({"tipo": "oido", "texto": dicho})
+            else:
+                dicho = (msg.get("texto") or "").strip()
+                if not dicho:
+                    continue
+            await _responder(ws, dicho)
+        except Exception:
+            log.exception("falló la respuesta")
+            await ws.send_json({"tipo": "error",
+                                "texto": "No pude responder. Inténtalo de nuevo."})
