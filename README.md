@@ -133,12 +133,26 @@ pero impide automatizar la descarga. Deja en `assets/flame/`:
 ```bash
 uv run python pipeline/convert_flame.py --inspeccionar   # ver qué trae el .pkl
 uv run python pipeline/convert_flame.py                  # -> assets/flame/flame.npz
-uv run python pipeline/fit_face.py assets/fotos/mistral-1946-frontal.jpg --preview
+uv run python pipeline/fit_face.py assets/fotos/mistral-1946-frontal.jpg \
+    assets/fotos/mistral-1946-sanfrancisco.jpg assets/fotos/mistral-1946-truman.jpg \
+    assets/fotos/mistral-1946-microfono.jpg \
+    --perfiles assets/fotos/perfiles.json --preview
+uv run python pipeline/hair_volume.py assets/fotos/mistral-1946-frontal.jpg
 ```
 
-El `--preview` deja en `/tmp/ajuste.png` la comparación entre los landmarks de la
-foto (verde) y los del modelo ajustado (magenta). **Míralo antes de seguir**: si no
-se reconoce, sube `REGULARIZACION` en `fit_face.py` o consigue una foto mejor.
+Las fotos comparten una sola forma β; cada una aporta su cámara y su expresión,
+para que el ceño de una o la boca apretada de otra no se cuelen en la forma. La
+primera, frontal, es la referencia: de ella salen la textura y la silueta del
+cráneo. El perfil de `perfiles.json` va anotado a mano —mediapipe no ve caras de
+perfil— y aporta la silueta de frente, nariz, labios y mentón (`pipeline/perfil.py`).
+`hair_volume.py` se vuelve a correr porque guarda vértices absolutos, calculados
+con la forma anterior.
+
+El `--preview` deja en `/tmp/ajuste*.png` la comparación entre los landmarks de
+cada foto (verde) y los del modelo ajustado (magenta), y en
+`/tmp/ajuste-perfil-*.png` el borde medido del perfil contra la malla. **Míralos
+antes de seguir**: si no se reconoce, sube `REGULARIZACION` en `fit_face.py` o
+consigue una foto mejor.
 
 La referencia es `assets/fotos/mistral-1946-frontal.jpg` (1946, Marcos Chamúdez,
 dominio público): 170 px entre ojos y encuadre frontal, contra los 37 px de la

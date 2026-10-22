@@ -173,7 +173,11 @@ if __name__ == "__main__":
     # rasgos.py se conserva para un acabado escultórico sin fotografía.
     from fit_face import proyectar
     from textura import preparar
-    imagen, uv = preparar(base, aj["camara"], FOTO, proyectar)
+    # Las UV salen de la cara CON la expresión que tenía en la foto: proyectar la
+    # cara neutra desplaza la textura justo donde la expresión movía la malla, y
+    # las cejas o la comisura de la foto caen fuera de su sitio.
+    en_foto = base if "psi" not in aj.files else evaluar(m, beta, psi=aj["psi"]) + desplazamiento
+    imagen, uv = preparar(en_foto, aj["camara"], FOTO, proyectar)
 
     destino = escribir_glb(base, m["f"], morphs, raiz / "assets" / "gabriela.glb",
                            uv=uv, imagen=imagen)
