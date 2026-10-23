@@ -1,8 +1,10 @@
 """Servidor: sirve el visor y responde por WebSocket con voz y visemas.
 
-No hay chat. Lo que el visitante escribe o dice se compara con las preguntas
-frecuentes (entender.py) y suena la respuesta grabada que corresponda: siempre
-la misma, verificada y al instante.
+Lo que el visitante escribe o dice se compara primero con las preguntas
+frecuentes (entender.py) y, si una se parece, suena su respuesta grabada:
+siempre la misma, verificada y al instante. Si ninguna se parece, un LLM local
+contesta con los documentos oficiales del museo (saber.py) y lo dice con la voz
+en vivo (vivo.py); si tampoco ahí hay nada, suena el «no te entendí» grabado.
 """
 from __future__ import annotations
 
@@ -16,8 +18,8 @@ from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import entender, vivo
-from .config import ASSETS, RESPALDO, WEB
+from . import entender, saber, vivo
+from .config import ASSETS, RESPALDO, UMBRAL, WEB
 from .visemes import VISEMAS, timeline
 from .voice import SAMPLE_RATE, a_wav, calentar, frecuentes, respaldo
 
@@ -41,6 +43,7 @@ async def ciclo(_app):
     """
     for nombre, paso in (("grabar las respuestas", calentar),
                          ("cargar Whisper y el elector", entender.calentar),
+                         ("cargar los documentos y el LLM", saber.calentar),
                          ("cargar la voz en vivo", vivo.calentar)):
         try:
             log.info("preparando: %s…", nombre)
@@ -106,12 +109,39 @@ def _habla(partes: list[tuple[str, bytes]], continuacion: bool = False,
     }
 
 
+def _elegir(dicho: str, grabadas) -> str | None:
+    """La frecuente que contesta `dicho`. Con documentos, tiene que parecérsele
+    más que ellos (saber.piso); sin ellos, basta con pasar de UMBRAL."""
+    umbral = UMBRAL
+    if saber.disponible():
+        umbral = max(umbral, saber.piso(dicho))
+    return entender.elegir(dicho, grabadas, umbral)
+
+
 async def _responder(ws: WebSocket, dicho: str) -> None:
-    """Hace sonar la frecuente que corresponde a `dicho`, o el respaldo."""
+    """Hace sonar la frecuente que corresponde a `dicho`; si no hay, lo que
+    digan los documentos del museo; y si tampoco, el respaldo."""
     grabadas = frecuentes()
     # Un badge manda la pregunta tal cual: no hace falta preguntarle a nadie.
-    pregunta = dicho if dicho in grabadas else await asyncio.to_thread(
-        entender.elegir, dicho, grabadas)
+    pregunta = dicho if dicho in grabadas else await asyncio.to_thread(_elegir, dicho, grabadas)
+    if pregunta is None and saber.disponible():
+        await ws.send_json({"tipo": "pensando"})
+        try:
+            texto, fuentes = await asyncio.to_thread(saber.responder, dicho)
+        except Exception:
+            # Sin LLM (no se pudo cargar) queda el respaldo grabado, como antes.
+            log.exception("el LLM no pudo responder")
+            texto, fuentes = None, []
+        if texto:
+            try:
+                await _decir(ws, texto, fuentes)
+            except Exception:
+                # Sin voz en vivo (falta llama-cpp-python o falló la síntesis)
+                # la respuesta igual vale: queda escrita, como el respaldo
+                # sin grabar.
+                log.exception("no pude decir la respuesta del LLM")
+                await ws.send_json({"tipo": "error", "texto": texto})
+            return
     partes = grabadas.get(pregunta) or respaldo()
     texto = " ".join(f for f, _ in partes) or RESPALDO
     await ws.send_json({"tipo": "texto", "texto": texto, "pregunta": pregunta})
@@ -122,16 +152,17 @@ async def _responder(ws: WebSocket, dicho: str) -> None:
         await ws.send_json({"tipo": "error", "texto": texto})
 
 
-async def _decir(ws: WebSocket, texto: str) -> None:
+async def _decir(ws: WebSocket, texto: str, fuentes: list[str] | None = None) -> None:
     """Dice `texto` con su voz, sintetizada al momento.
 
     Manda una `habla` por unidad según se sintetiza: el visor las encadena, así
     que empieza a sonar la primera mientras se hacen las demás. De dónde sale el
-    texto (hoy, quien lo mande; mañana, el modelo conversacional) no es asunto
-    de este camino.
+    texto (quien lo mande, o el LLM de saber.py) no es asunto de este camino;
+    `fuentes` son las URL de los documentos de donde salió, para mostrarlas.
     """
     unidades = vivo.unidades(texto)
-    await ws.send_json({"tipo": "texto", "texto": " ".join(unidades)})
+    await ws.send_json({"tipo": "texto", "texto": " ".join(unidades),
+                        "fuentes": fuentes or []})
     for i, frase in enumerate(unidades):
         pcm = await asyncio.to_thread(vivo.sintetizar, frase)
         await ws.send_json(_habla([(frase, pcm)], continuacion=i > 0,

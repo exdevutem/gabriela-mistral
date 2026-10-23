@@ -456,6 +456,82 @@ def test_decir_manda_una_habla_por_unidad_y_las_encadena():
     assert mandados[0]["tipo"] == "texto"
 
 
+def test_el_llm_no_dice_fechas_que_no_estan_en_los_documentos():
+    # Es la única forma de alucinación que se puede pillar sin entender el
+    # texto, y la que más cuesta en un museo.
+    from gabriela.saber import comprobar
+
+    contexto = "El museo fue creado en 1941. En 1981 se trasladó al edificio."
+    assert comprobar("Nació el año 1941, como Museo Pedagógico.", contexto)
+    assert comprobar("Se creó en 1.941.", contexto), "los puntos de miles son el mismo número"
+    assert comprobar("Se creó en 1938.", contexto) is None, "dejó pasar un año inventado"
+    assert comprobar("NO_LO_SÉ", contexto) is None
+    assert comprobar("No lo sé. No respondí a eso.", contexto) is None
+    assert comprobar("No sé qué pensaba de eso.", contexto) is None
+    assert comprobar("No soy de aquí, pero el museo es de 1941.", contexto), "«no» no es «no sé»"
+    assert comprobar("  ", contexto) is None
+    assert comprobar("<think>\n</think>\n\nFue en 1981.", contexto) == "Fue en 1981."
+
+
+def test_si_no_hay_frecuente_contesta_el_llm_y_si_no_el_respaldo():
+    import asyncio
+
+    import gabriela.server as server
+
+    mandados = []
+
+    class WS:
+        async def send_json(self, m):
+            mandados.append(m)
+
+    un_segundo = (np.sin(np.arange(SAMPLE_RATE) / 3) * 9000).astype("<i2").tobytes()
+    reales = (server.frecuentes, server.respaldo, server.entender.elegir, server.saber.piso,
+              server.saber.disponible, server.saber.responder, server.vivo.sintetizar)
+    server.saber.piso = lambda texto: 0.7
+    server.frecuentes = lambda: {}
+    server.respaldo = lambda: [("No te entendí bien.", un_segundo)]
+    umbrales = []
+    server.entender.elegir = lambda texto, grabadas, umbral: umbrales.append(umbral)
+    server.saber.disponible = lambda: True
+    server.vivo.sintetizar = lambda frase: un_segundo
+    try:
+        server.saber.responder = lambda p: ("Fue en mil novecientos cuarenta y uno.", ["https://x"])
+        asyncio.run(server._responder(WS(), "¿cuándo empezó?"))
+        # Con documentos, la frecuente tiene que ganarles a ellos, no sólo a UMBRAL.
+        assert umbrales == [0.7], umbrales
+        textos = [m for m in mandados if m["tipo"] == "texto"]
+        assert textos and textos[0]["fuentes"] == ["https://x"], mandados
+        assert any(m["tipo"] == "habla" for m in mandados), "no habló"
+
+        # El LLM no sabe: suena el respaldo grabado, sin fuentes.
+        mandados.clear()
+        server.saber.responder = lambda p: (None, [])
+        asyncio.run(server._responder(WS(), "¿qué hora es?"))
+        textos = [m for m in mandados if m["tipo"] == "texto"]
+        assert textos[0]["texto"] == "No te entendí bien.", textos
+
+        # La voz en vivo falla: la respuesta queda escrita, no se pierde.
+        mandados.clear()
+        server.saber.responder = lambda p: ("Fue en mil novecientos cuarenta y uno.", ["https://x"])
+        server.vivo.sintetizar = lambda frase: 1 / 0
+        asyncio.run(server._responder(WS(), "¿cuándo empezó?"))
+        assert mandados[-1] == {"tipo": "error", "texto": "Fue en mil novecientos cuarenta y uno."}
+    finally:
+        (server.frecuentes, server.respaldo, server.entender.elegir, server.saber.piso,
+         server.saber.disponible, server.saber.responder, server.vivo.sintetizar) = reales
+
+
+def test_el_corpus_se_fragmenta_sin_perder_texto_ni_pasarse():
+    sys.path.insert(0, "pipeline")
+    from conocimiento import CORTO, LARGO, fragmentar
+
+    parrafos = ["Uno corto pero con suficientes palabras para pasar el filtro de ochenta.",
+                "Frase larga. " * 80, "x"]
+    frag = fragmentar(parrafos)
+    assert all(len(f) <= LARGO + CORTO for f in frag), [len(f) for f in frag]
+    assert " ".join(frag).split() == " ".join(parrafos).split(), "se perdió texto"
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

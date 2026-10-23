@@ -118,14 +118,14 @@ def mas_parecida(consulta: np.ndarray, vectores: np.ndarray, duenos: np.ndarray,
     return (i if parecido[i] >= umbral else None), float(parecido[i])
 
 
-def elegir(texto: str, disponibles) -> str | None:
+def elegir(texto: str, disponibles, umbral: float = UMBRAL) -> str | None:
     """La pregunta frecuente que mejor responde a `texto`, entre las que están
-    grabadas (`disponibles`), o None si ninguna se le parece lo bastante."""
+    grabadas (`disponibles`), o None si ninguna pasa de `umbral`."""
     if not texto.strip():
         return None
     preguntas, vectores, duenos = _indice()
     i, parecido = mas_parecida(_vectores([texto])[0], vectores, duenos,
-                               [p in disponibles for p in preguntas])
+                               [p in disponibles for p in preguntas], umbral)
     log.info("«%s» -> %s (%.2f)", texto, preguntas[i] if i is not None else "nada", parecido)
     return preguntas[i] if i is not None else None
 
