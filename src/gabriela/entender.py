@@ -46,7 +46,11 @@ def _whisper():
     device = WHISPER_DEVICE
     if device == "auto":
         device = "mps" if torch.backends.mps.is_available() else "cpu"
-    return pipeline("automatic-speech-recognition", model=WHISPER_MODELO, device=device)
+    # En la GPU, media precisión: medido en un M5 con 7 s de habla, 0,77 s por
+    # pasada contra 0,98, con la misma transcripción. En CPU no conviene.
+    dtype = torch.float32 if device == "cpu" else torch.float16
+    return pipeline("automatic-speech-recognition", model=WHISPER_MODELO, device=device,
+                    dtype=dtype)
 
 
 def transcribir(pcm: bytes) -> str:
