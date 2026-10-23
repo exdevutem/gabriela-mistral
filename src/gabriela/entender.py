@@ -46,7 +46,11 @@ def _whisper():
     device = WHISPER_DEVICE
     if device == "auto":
         device = "mps" if torch.backends.mps.is_available() else "cpu"
-    return pipeline("automatic-speech-recognition", model=WHISPER_MODELO, device=device)
+    # En la GPU, media precisión: medido en un M5 con 7 s de habla, 0,77 s por
+    # pasada contra 0,98, con la misma transcripción. En CPU no conviene.
+    dtype = torch.float32 if device == "cpu" else torch.float16
+    return pipeline("automatic-speech-recognition", model=WHISPER_MODELO, device=device,
+                    dtype=dtype)
 
 
 def transcribir(pcm: bytes) -> str:
@@ -114,14 +118,14 @@ def mas_parecida(consulta: np.ndarray, vectores: np.ndarray, duenos: np.ndarray,
     return (i if parecido[i] >= umbral else None), float(parecido[i])
 
 
-def elegir(texto: str, disponibles) -> str | None:
+def elegir(texto: str, disponibles, umbral: float = UMBRAL) -> str | None:
     """La pregunta frecuente que mejor responde a `texto`, entre las que están
-    grabadas (`disponibles`), o None si ninguna se le parece lo bastante."""
+    grabadas (`disponibles`), o None si ninguna pasa de `umbral`."""
     if not texto.strip():
         return None
     preguntas, vectores, duenos = _indice()
     i, parecido = mas_parecida(_vectores([texto])[0], vectores, duenos,
-                               [p in disponibles for p in preguntas])
+                               [p in disponibles for p in preguntas], umbral)
     log.info("«%s» -> %s (%.2f)", texto, preguntas[i] if i is not None else "nada", parecido)
     return preguntas[i] if i is not None else None
 

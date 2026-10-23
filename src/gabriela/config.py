@@ -215,10 +215,12 @@ FRECUENTES = [
 # «¿Dónde estamos?»—. Si una pregunta real cae en la respuesta equivocada,
 # agregarla aquí es el arreglo; la clave tiene que ser una de FRECUENTES.
 VARIANTES = {
-    "¿Qué fue este edificio?": ["¿Qué era esta casa antes?", "¿Para qué servía este lugar?"],
+    "¿Qué fue este edificio?": ["¿Qué era esta casa antes?", "¿Para qué servía este lugar?",
+                                "¿Qué era esta casa antes del museo?"],
     "¿Desde cuándo existe el museo?": ["¿Cuántos años tiene el museo?",
                                        "¿Cuándo llegó el museo a esta casa?"],
-    "¿Por qué lleva tu nombre?": ["¿Por qué el museo se llama Gabriela Mistral?"],
+    "¿Por qué lleva tu nombre?": ["¿Por qué el museo se llama Gabriela Mistral?",
+                                  "¿Por qué el museo tiene tu nombre?"],
     "¿Qué se guarda aquí?": ["¿Qué hay en el museo?", "¿Qué cosas tiene el museo?"],
     "¿Por qué estuvo cerrado?": ["¿Por qué cerraron el museo?"],
     "¿Quién fue Brígida Walker?": ["¿Quién era la directora de la escuela?",
@@ -260,6 +262,32 @@ EMBEDDINGS_MODELO = os.getenv(
 # Por debajo suena RESPALDO. Subirlo hace que diga «no te entendí» más seguido;
 # bajarlo, que conteste algo que no le preguntaron.
 UMBRAL = float(os.getenv("UMBRAL", "0.5"))
+
+# --- Lo que sabe fuera de las frecuentes (saber.py) ---
+# Si ninguna frecuente pasa de UMBRAL, se buscan los documentos oficiales del
+# museo y un LLM local muy pequeño contesta con ellos. Ver saber.py.
+CONOCIMIENTO = Path(os.getenv("CONOCIMIENTO", ASSETS / "conocimiento" / "fragmentos.jsonl"))
+# Ruta a un .gguf o `repo:archivo` de Hugging Face. Vacío apaga el LLM y todo
+# lo que no sea frecuente vuelve a ser «no te entendí».
+# LFM2.5 1,2B en Q4_K_M (731 MB). Medido el 23 de octubre de 2026 contra
+# Qwen3.5 0,8B y 2B y Gemma 3 1B con diez preguntas del museo: es el que menos
+# se aparta de los fragmentos. Gemma convirtió a José Abelardo Núñez en militar;
+# Qwen 0,8B contesta «Sí,» a todo; Qwen 2B redacta mejor pero adorna.
+LLM_GGUF = os.getenv("LLM_GGUF", "LiquidAI/LFM2.5-1.2B-Instruct-GGUF:LFM2.5-1.2B-Instruct-Q4_K_M.gguf")
+# "auto" = todas las capas a la GPU si llama.cpp se compiló con Metal o CUDA;
+# "cpu" = ninguna.
+LLM_DEVICE = os.getenv("LLM_DEVICE", "auto")
+LLM_CTX = int(os.getenv("LLM_CTX", "2048"))
+# Cuánto puede escribir: dos o tres frases dichas en voz alta son ~60 tokens.
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "120"))
+# Fragmentos que se le dan al modelo. Más, más contexto que leer en CPU.
+LLM_FRAGMENTOS = int(os.getenv("LLM_FRAGMENTOS", "4"))
+# Parecido mínimo entre la pregunta y un fragmento para que valga la pena
+# preguntarle al modelo. Por debajo, la pregunta no es del museo ni de ella.
+SABER_UMBRAL = float(os.getenv("SABER_UMBRAL", "0.5"))
+# Cuánto más que el mejor documento tiene que parecerse una frecuente para
+# contestar ella con lo grabado. Ver saber.piso().
+SABER_MARGEN = float(os.getenv("SABER_MARGEN", "0.05"))
 
 # El mundo físico necesita perillas.
 # "auto" = mps si la máquina lo tiene, cpu si no. Se resuelve en voice.py, que

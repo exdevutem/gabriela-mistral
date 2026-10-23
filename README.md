@@ -8,19 +8,24 @@ con su voz y moviendo la cara. Backend en Python, render en el navegador.
 
 ## Cómo funciona
 
-**No hay chat.** Ella sólo dice respuestas escritas y verificadas de antemano
-—las preguntas frecuentes de `config.py`—, grabadas con su voz al arrancar. Lo
-que el visitante escribe o le dice al micrófono se compara con esas preguntas y
-suena la respuesta que más se le parezca:
+Primero, **respuestas grabadas**: las preguntas frecuentes de `config.py`,
+escritas y verificadas de antemano y grabadas con su voz al arrancar. Lo que el
+visitante escribe o le dice al micrófono se compara con esas preguntas y suena
+la respuesta que más se le parezca. Si ninguna se parece, un **LLM local muy
+pequeño** contesta con los documentos oficiales del museo y lo dice con la voz
+en vivo:
 
 ```
 micrófono ──> Whisper (local) ──┐
-                                ├──> embeddings (local) ──> respuesta grabada
-texto o badge ──────────────────┘          │                  │
-                                    si nada se parece:        │
-                                    «No te entendí bien…»     │
-                                                              ▼
-                        envolvente RMS ─┬─ visemas del texto ─> three.js
+                                ├──> embeddings (local) ──> respuesta grabada ─────────┐
+texto o badge ──────────────────┘          │                                           │
+                                  si ninguna frecuente se parece:                      │
+                                  documentos del museo ──> LFM2.5 1,2B ──> voz en vivo┤
+                                           │                (llama.cpp)                │
+                                  si no hay nada o inventa una cifra:                  │
+                                  «No te entendí bien…» (grabado) ─────────────────────┤
+                                                                                       ▼
+                                       envolvente RMS ─┬─ visemas del texto ─> three.js
 ```
 
 - **Whisper** (`openai/whisper-small`) sólo transcribe. Elegir la respuesta lo
@@ -33,6 +38,11 @@ texto o badge ──────────────────┘         
   forma de que invente nada, suenan al instante y no hace falta ni red ni
   clave. Se probó primero con Gemini (texto y voz), pero el nivel gratuito del
   TTS da 3 peticiones por minuto y 10 al día.
+- **Fuera de las frecuentes** contesta `saber.py`: busca en
+  `assets/conocimiento/fragmentos.jsonl` —el sitio del museo y su libro *Lucila
+  Gabriela: La voz de la Maestra*, ver «Lo que sabe» más abajo— con el mismo
+  modelo de embeddings, y le pasa los cuatro mejores fragmentos a un LLM de
+  1,2B. Debajo del texto se muestran los documentos de donde salió.
 - **Si contesta otra cosa**: el log muestra qué entendió y qué eligió
   (`gabriela.entender: «…» -> ¿…? (0.72)`). El arreglo es agregar esa forma
   de preguntar a `VARIANTES`.
@@ -117,6 +127,58 @@ Con ese acceso, `VIVO_GGUF=neuphonic/neutts-nano-spanish-q4-gguf` lo reemplaza y
 queda más pequeño y más rápido. **Sin probar todavía en el clúster**: la imagen
 de Docker no incluye `llama-cpp-python`, y sin él el servidor arranca igual pero
 `decir` responde con error.
+
+## Lo que sabe
+
+`assets/conocimiento/fragmentos.jsonl` son los documentos oficiales del museo
+partidos en fragmentos de ~500 caracteres, cada uno con la URL de donde salió.
+Se versiona; para rehacerlo:
+
+```bash
+uv run pipeline/conocimiento.py                  # sitio del museo + «La voz de la Maestra»
+uv run pipeline/conocimiento.py --obra-reunida   # + los 8 tomos de su Obra reunida
+uv run python -m gabriela.saber "¿qué fue la exposición retrospectiva?"   # qué busca y qué contesta
+```
+
+Recorre `museodelaeducacion.gob.cl` (sin noticias, bibliografías ni juegos) y
+extrae el PDF de *Lucila Gabriela: La voz de la Maestra* (MEGM, 2008). La *Obra
+reunida* queda fuera por defecto: miles de páginas de poesía y prosa que ahogan
+los datos del museo en la búsqueda.
+
+El modelo es [LFM2.5 1,2B Instruct](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF)
+en Q4_K_M (731 MB), sobre el mismo `llama-cpp-python` que ya usa la voz en vivo:
+no suma dependencias. Se descarga solo la primera vez. `LLM_GGUF` lo cambia por
+otra ruta o `repo:archivo` de Hugging Face, y vacío lo apaga. Su licencia (LFM
+Open License 1.0) permite uso comercial a organizaciones con menos de 10
+millones de dólares de ingresos al año.
+
+Elegido el 23 de octubre de 2026 entre cuatro, con diez preguntas del museo que
+no están entre las frecuentes y cinco que no son del tema, en un M5 con Metal:
+
+| modelo (Q4_K_M) | tamaño | por respuesta | cómo contesta |
+|---|---|---|---|
+| **LFM2.5 1,2B** | 731 MB | **0,4–1,2 s** | Corto y pegado a los fragmentos |
+| Qwen3.5 0,8B | 533 MB | 0,3–1,1 s | Empieza todo con «Sí,»; a veces basura («No, no.») |
+| Gemma 3 1B | 806 MB | 0,4–3,1 s | Inventa: hizo militar a José Abelardo Núñez |
+| Qwen3.5 2B | 1,3 GB | 1,8–3,8 s | El que mejor redacta, pero adorna lo que no dicen |
+
+**Sin GPU es otra cosa.** En la CPU del mismo M5, con 8 hilos, una respuesta
+tarda ~6,5 s: casi todo es leer los cuatro fragmentos (656 tokens), no
+escribir. En el clúster no está medido. Si tarda demasiado, `LLM_FRAGMENTOS=2`
+le da la mitad que leer, a cambio de que encuentre menos. Las frecuentes no
+cambian: siguen sonando al instante.
+
+Las cinco ajenas al museo («¿qué hora es?», «una receta de empanadas»…) no
+llegan al modelo en ninguno: el mejor fragmento se les parece 0,46 como mucho,
+y las del museo empiezan en 0,56. De ahí `SABER_UMBRAL` = 0,5.
+
+**Cómo se evita que invente**: el modelo sólo ve los fragmentos y tiene orden
+de contestar `NO_LO_SÉ` si no están; si ningún fragmento se parece lo bastante a
+la pregunta (`SABER_UMBRAL`), ni se le pregunta. Y toda cifra de la respuesta
+tiene que estar en los fragmentos que se le dieron: si nombra un año que no
+aparece, la respuesta se descarta y suena el «no te entendí» grabado. No pilla
+un nombre cambiado ni una frase mal resumida —eso hay que leerlo en el log—,
+pero sí la fecha inventada, que es lo que un modelo así inventa más.
 
 ## Puesta en marcha
 
@@ -225,6 +287,7 @@ uv run python tests/test_visemes.py                          # lógica de visema
 uv run python tests/test_local.py                            # elector, audio y calidad de tomas
 uv run python pipeline/landmarks.py assets/fotos/mistral-1946-frontal.jpg
 uv run python -m gabriela.entender "dónde naciste" "hola"    # qué respuesta elige
+uv run python -m gabriela.saber "¿quién fue José Abelardo Núñez?"  # lo que no es frecuente
 uv run python -m gabriela.voice "Hola" --out /tmp/g.wav      # solo voz
 uv run python -m gabriela.voice "Hola" --grabado             # como lo pre-grabado
 uv run python -m gabriela.visemes /tmp/g.wav "Hola"          # timeline

@@ -22,6 +22,10 @@
   #dicho { min-height: 3.2em; margin: 0; font-size: 1.15rem; }
   #dicho.pensando { color: var(--tenue); font-style: italic; }
   #dicho.error { color: #f0b7a4; }
+  /* De qué documentos del museo salió una respuesta que no estaba grabada. */
+  #fuentes { margin: -.4rem 0 0; font-size: .78rem; color: var(--tenue); }
+  #fuentes a { color: inherit; }
+  #fuentes[hidden] { display: none; }
   form { display: flex; gap: .5rem; }
   input { flex: 1; padding: .7rem .9rem; border-radius: .4rem; font: inherit;
           background: #1e1917; color: var(--tinta); border: 1px solid #352d28; }
@@ -71,6 +75,7 @@
   <canvas id="lienzo" aria-label="Retrato animado de Gabriela Mistral"></canvas>
   <div id="pie">
     <p id="dicho" role="status" aria-live="polite"></p>
+    <p id="fuentes" hidden></p>
     <div id="reproductor" role="group" aria-label="Reproducción de la respuesta" hidden>
       <button id="pausa" type="button" aria-label="Pausar">❚❚</button>
       <button id="detener" type="button" aria-label="Detener">■</button>
@@ -98,6 +103,7 @@ const enviar = document.getElementById('enviar');
 const forma = document.getElementById('forma');
 const badges = document.getElementById('badges');
 const microfono = document.getElementById('microfono');
+const fuentes = document.getElementById('fuentes');
 
 // Sin try, un GLB que falta o viene corrupto aborta el módulo entero: no se
 // crea el WebSocket, no se registra ningún handler y el kiosco queda negro y
@@ -212,6 +218,15 @@ function alMensaje({ data }) {
   if (m.tipo === 'texto')    {
     dicho.className = '';
     dicho.textContent = m.texto;
+    // Las grabadas no traen fuentes; las que escribe el LLM sí, y se muestran
+    // para que se vea que no salen de la nada.
+    fuentes.replaceChildren(...(m.fuentes || []).flatMap((url, i) => {
+      const a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = `[${i + 1}]`;
+      return i ? [' ', a] : ['Según documentos del museo: ', a];
+    }));
+    fuentes.hidden = !m.fuentes?.length;
   }
   if (m.tipo === 'habla')    {
     // La respuesta entera en un audio. Una nueva corta a la anterior: se puede
@@ -240,6 +255,7 @@ conectar();
  */
 function preguntar(texto) {
   avatar?.desbloquear();
+  fuentes.hidden = true;
   // «/decir …» prueba la voz en vivo: lo dice tal cual, sin elegir respuesta.
   const decir = texto.match(/^\/decir\s+(.+)/s);
   ws.send(JSON.stringify(decir ? { tipo: 'decir', texto: decir[1] } : { tipo: 'pregunta', texto }));

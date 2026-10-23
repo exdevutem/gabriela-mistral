@@ -1,15 +1,16 @@
 # Despliegue en el cluster de exdev
 
-Una imagen, sin chat: FastAPI sirve el visor y contesta las preguntas
-frecuentes con respuestas grabadas. Lo que el visitante dice lo transcribe
-Whisper y lo empareja un modelo de embeddings, los dos dentro del contenedor.
-No necesita ninguna clave de API.
+Una imagen: FastAPI sirve el visor y contesta las preguntas frecuentes con
+respuestas grabadas. Lo que el visitante dice lo transcribe Whisper y lo
+empareja un modelo de embeddings; lo que no es frecuente lo contesta un LLM de
+1,2B con los documentos del museo y lo dice la voz en vivo. Todo dentro del
+contenedor, sin ninguna clave de API.
 
 > [!NOTE]
-> Hasta octubre de 2026 la imagen levantaba además un `llama-server` para el
-> chat. El `arranque.sh` ya no lo inicia, pero el `Dockerfile` todavía lo
-> compila y las cifras de RAM y CPU de más abajo se midieron con chat y voz en
-> vivo: hay que adelgazar la imagen y re-medir.
+> Hasta octubre de 2026 la imagen compilaba además un `llama-server` que ya no
+> arrancaba nadie. Ahora compila la rueda de `llama-cpp-python`, que es lo que
+> usan la voz en vivo y el LLM. Las cifras de RAM y CPU de más abajo se
+> midieron con el chat anterior y están pendientes de re-medir.
 
 > [!WARNING]
 > **Esta imagen nunca se ha construido.** Se escribió en una máquina sin Docker,
@@ -17,7 +18,7 @@ No necesita ninguna clave de API.
 > dependencias resuelven para `linux/amd64` con `torch==2.14.0+cpu` y sin
 > paquetes de NVIDIA. Da por hecho que el primer `docker build` va a fallar en
 > algo y reserva tiempo para ello. Los puntos más frágiles son la compilación de
-> `llama-server` y que `assets/gabriela.glb` exista antes de construir.
+> `llama-cpp-python` y que `assets/gabriela.glb` exista antes de construir.
 
 ## Antes de construir
 
@@ -47,15 +48,21 @@ docker build --platform linux/amd64 -t ghcr.io/exdevutem/gabriela-mistral:0.1.0 
 docker push ghcr.io/exdevutem/gabriela-mistral:0.1.0
 ```
 
-El build compila `llama-server` desde las fuentes en un stage aparte. Es a
-propósito: copiar un binario publicado cruzaría distribuciones, y compilarlo aquí
-lo enlaza contra la misma libc que la imagen final. Fija `--build-arg
-LLAMA_TAG=bXXXX` para no depender de `master`.
+El build compila la rueda de `llama-cpp-python` en un stage aparte, porque no
+publican ruedas de Linux para Python 3.13; la imagen final sólo la instala, sin
+compilador.
 
 **`GGML_NATIVE=OFF` no se toca.** Con él encendido, el compilador usa las
 instrucciones del runner que construye la imagen —AVX-512 en cualquier CI
 moderno— y el binario muere con `SIGILL` en los Xeon del cluster, que son más
-viejos. Apagado, llama.cpp detecta las extensiones al arrancar.
+viejos. Apagado, hay que nombrar las extensiones: el build pide AVX2 + FMA, que
+tiene cualquier Xeon desde Haswell (2013). Si el nodo es anterior,
+`--build-arg LLAMA_CPU="-DGGML_AVX=ON"`.
+
+**La voz en vivo necesita su GGUF en el volumen**: `pipeline/convertir_gguf.py`
+lo genera en `assets/models/neutts-nano-spanish-f16.gguf` (467 MB) y hay que
+copiarlo a `/modelos/`. Sin él el servidor arranca igual, pero lo que contesta
+el LLM queda escrito y sin voz.
 
 ### Desde GitHub Actions
 
@@ -132,7 +139,10 @@ Variables que conviene fijar en el contenedor:
 | `WHISPER_MODELO` | `openai/whisper-small` | `openai/whisper-base` pesa un tercio y se equivoca más. `openai/whisper-large-v3-turbo` acierta algo más y en un M5 con mps va a 0,5 s por audio, pero pesa ~1,6 GB y en CPU no está medido. |
 | `WHISPER_DEVICE` | `auto` | `auto` elige mps si lo hay y cpu si no; en el cluster siempre cae en cpu. |
 | `EMBEDDINGS_MODELO` | `paraphrase-multilingual-MiniLM-L12-v2` | El que elige la respuesta. |
-| `UMBRAL` | `0.5` | Parecido mínimo; por debajo dice «no te entendí». |
+| `UMBRAL` | `0.5` | Parecido mínimo con una frecuente; por debajo pregunta al LLM. |
+| `LLM_GGUF` | `LiquidAI/LFM2.5-1.2B-Instruct-GGUF:LFM2.5-1.2B-Instruct-Q4_K_M.gguf` | El LLM que contesta lo que no es frecuente. Vacío lo apaga. |
+| `SABER_UMBRAL` | `0.5` | Parecido mínimo con un documento del museo; por debajo dice «no te entendí». |
+| `VIVO_GGUF` | `/modelos/neutts-nano-spanish-f16.gguf` | La voz en vivo, para lo que dice el LLM. |
 | `RESPALDO_DIR` | `/modelos/respaldo` | Dónde se graba el «no te entendí». |
 | `GEMINI_API_KEY` | vacío | Sólo con `VOZ_MOTOR=gemini`. |
 | `GEMINI_TTS_MODELO` | `gemini-3.8-flash-lite-tts` | El TTS más barato. |
