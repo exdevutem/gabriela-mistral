@@ -215,10 +215,12 @@ FRECUENTES = [
 # «¿Dónde estamos?»—. Si una pregunta real cae en la respuesta equivocada,
 # agregarla aquí es el arreglo; la clave tiene que ser una de FRECUENTES.
 VARIANTES = {
-    "¿Qué fue este edificio?": ["¿Qué era esta casa antes?", "¿Para qué servía este lugar?"],
+    "¿Qué fue este edificio?": ["¿Qué era esta casa antes?", "¿Para qué servía este lugar?",
+                                "¿Qué era esta casa antes del museo?"],
     "¿Desde cuándo existe el museo?": ["¿Cuántos años tiene el museo?",
                                        "¿Cuándo llegó el museo a esta casa?"],
-    "¿Por qué lleva tu nombre?": ["¿Por qué el museo se llama Gabriela Mistral?"],
+    "¿Por qué lleva tu nombre?": ["¿Por qué el museo se llama Gabriela Mistral?",
+                                  "¿Por qué el museo tiene tu nombre?"],
     "¿Qué se guarda aquí?": ["¿Qué hay en el museo?", "¿Qué cosas tiene el museo?"],
     "¿Por qué estuvo cerrado?": ["¿Por qué cerraron el museo?"],
     "¿Quién fue Brígida Walker?": ["¿Quién era la directora de la escuela?",
