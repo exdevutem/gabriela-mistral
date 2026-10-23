@@ -1,6 +1,6 @@
 # Construye la imagen del contenedor y la publica en GitHub Packages (ghcr.io).
 #
-# El build es largo —compila llama-server desde las fuentes e instala torch—,
+# El build es largo —compila llama-cpp-python desde las fuentes e instala torch—,
 # así que no corre en cada push: sólo al empujar una etiqueta `v*` y a mano
 # desde la pestaña Actions, que es de donde salen las imágenes de prueba.
 #
@@ -24,10 +24,10 @@ on:
         description: "Etiqueta extra para la imagen (ej. 0.1.0). Vacío, sólo rama y sha."
         required: false
         default: ""
-      llama_tag:
-        description: "Tag de llama.cpp a compilar. `master` no es reproducible."
+      llama_cpu:
+        description: "Extensiones de CPU para llama.cpp. Vacío = AVX2 + FMA (Xeon desde 2013)."
         required: false
-        default: "master"
+        default: ""
       publicar:
         description: "Subir la imagen a ghcr.io. Desmárcalo para sólo probar el build."
         type: boolean
@@ -132,7 +132,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            LLAMA_TAG=${{ inputs.llama_tag || 'master' }}
+            ${{ inputs.llama_cpu && format('LLAMA_CPU={0}', inputs.llama_cpu) || '' }}
           # La caché va al propio registro y no a la de Actions: `mode=max`
           # guarda también el stage de llama.cpp —lo que de verdad cuesta— y
           # eso solo no cabe en los 10 GB por repositorio que da Actions.
