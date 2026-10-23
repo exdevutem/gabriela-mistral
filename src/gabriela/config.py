@@ -293,6 +293,17 @@ SABER_UMBRAL = float(os.getenv("SABER_UMBRAL", "0.5"))
 # contestar ella con lo grabado. Ver saber.piso().
 SABER_MARGEN = float(os.getenv("SABER_MARGEN", "0.05"))
 
+# --- IA: Claude Haiku (saber.py, sólo con el switch «IA» de la página) ---
+# Con el switch encendido, lo que no es frecuente lo contesta Claude Haiku en
+# vez del LLM local, con los mismos fragmentos delante, y suena con la voz en
+# vivo. Sin clave el switch no aparece. Es de pago (octubre de 2026: 0,10 USD
+# por millón de tokens de entrada y 0,50 de salida, ~0,0002 USD por pregunta).
+# La clave ya pertenece a un workspace: no hace falta su id para llamar.
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
+IA_MODELO = os.getenv("IA_MODELO", "claude-haiku-5-5")
+# low: contesta antes y para dos o tres frases no hace falta pensar más.
+IA_ESFUERZO = os.getenv("IA_ESFUERZO", "low")
+
 # El mundo físico necesita perillas.
 # "auto" = mps si la máquina lo tiene, cpu si no. Se resuelve en voice.py, que
 # es donde torch ya está cargado. Medido en un M2 el 20 de septiembre de 2026,

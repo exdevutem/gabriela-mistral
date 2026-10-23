@@ -5,6 +5,7 @@ frecuentes (entender.py) y, si una se parece, suena su respuesta grabada:
 siempre la misma, verificada y al instante. Si ninguna se parece, un LLM local
 contesta con los documentos oficiales del museo (saber.py) y lo dice con la voz
 en vivo (vivo.py); si tampoco ahí hay nada, suena el «no te entendí» grabado.
+Con el switch «IA» de la página, ese LLM es Claude Haiku en vez del local.
 """
 from __future__ import annotations
 
@@ -118,16 +119,17 @@ def _elegir(dicho: str, grabadas) -> str | None:
     return entender.elegir(dicho, grabadas, umbral)
 
 
-async def _responder(ws: WebSocket, dicho: str) -> None:
+async def _responder(ws: WebSocket, dicho: str, ia: bool = False) -> None:
     """Hace sonar la frecuente que corresponde a `dicho`; si no hay, lo que
-    digan los documentos del museo; y si tampoco, el respaldo."""
+    digan los documentos del museo (con `ia`, lo que diga Claude); y si
+    tampoco, el respaldo."""
     grabadas = frecuentes()
     # Un badge manda la pregunta tal cual: no hace falta preguntarle a nadie.
     pregunta = dicho if dicho in grabadas else await asyncio.to_thread(_elegir, dicho, grabadas)
-    if pregunta is None and saber.disponible():
+    if pregunta is None and (ia or saber.disponible()):
         await ws.send_json({"tipo": "pensando"})
         try:
-            texto, fuentes = await asyncio.to_thread(saber.responder, dicho)
+            texto, fuentes = await asyncio.to_thread(saber.responder, dicho, ia)
         except Exception:
             # Sin LLM (no se pudo cargar) queda el respaldo grabado, como antes.
             log.exception("el LLM no pudo responder")
@@ -180,9 +182,10 @@ async def _parcial(ws: WebSocket, pcm: bytes) -> None:
 async def conversar(ws: WebSocket) -> None:
     """Mensajes de texto, en JSON:
 
-    - `{"tipo": "pregunta", "texto": …}`: escrita, o un badge.
+    - `{"tipo": "pregunta", "texto": …, "ia": bool}`: escrita, o un badge.
+      `ia` es el switch de la página: lo que no es frecuente lo contesta Claude.
     - `{"tipo": "decir", "texto": …}`: que lo diga con su voz, en vivo.
-    - `{"tipo": "fin"}`: el visitante terminó de hablar al micrófono.
+    - `{"tipo": "fin", "ia": bool}`: el visitante terminó de hablar al micrófono.
 
     Mensajes binarios: trozos de lo que va diciendo, PCM de 16 bits mono a
     16 kHz. Mientras llegan se transcribe lo acumulado y se devuelve como
@@ -192,7 +195,8 @@ async def conversar(ws: WebSocket) -> None:
     # Sólo se ofrecen las que están grabadas: un badge que lleva a una respuesta
     # a medio grabar es peor que no ofrecerlo.
     await ws.send_json({"tipo": "listo", "visemas": VISEMAS,
-                        "frecuentes": list(frecuentes())})
+                        "frecuentes": list(frecuentes()),
+                        "ia": saber.ia_disponible()})
     voz = bytearray()
     parcial: asyncio.Task | None = None
     while True:
@@ -210,6 +214,7 @@ async def conversar(ws: WebSocket) -> None:
                     parcial = asyncio.create_task(_parcial(ws, bytes(voz)))
                 continue
             msg = json.loads(m.get("text") or "{}")
+            ia = bool(msg.get("ia")) and saber.ia_disponible()
             if msg.get("tipo") == "decir":
                 if texto := (msg.get("texto") or "").strip()[:MAX_DECIR]:
                     await _decir(ws, texto)
@@ -225,7 +230,7 @@ async def conversar(ws: WebSocket) -> None:
                 dicho = (msg.get("texto") or "").strip()
                 if not dicho:
                     continue
-            await _responder(ws, dicho)
+            await _responder(ws, dicho, ia)
         except Exception:
             log.exception("falló la respuesta")
             await ws.send_json({"tipo": "error",

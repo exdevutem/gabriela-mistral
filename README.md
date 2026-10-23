@@ -43,6 +43,14 @@ texto o badge ──────────────────┘         
   Gabriela: La voz de la Maestra*, ver «Lo que sabe» más abajo— con el mismo
   modelo de embeddings, y le pasa los cuatro mejores fragmentos a un LLM de
   1,2B. Debajo del texto se muestran los documentos de donde salió.
+- **El switch «IA»**, junto a «Preguntar», cambia ese LLM local por Claude Haiku
+  (`claude-haiku-5-5`), con los mismos fragmentos delante. Las frecuentes siguen
+  sonando grabadas; lo demás lo escribe Haiku (~2–5 s) y lo dice la voz en vivo.
+  Contesta aunque ningún fragmento se parezca —con lo que se sabe de ella, o
+  diciendo que no lo sabe— y no pasa por el filtro de cifras del modelo local:
+  escribe los números con letras. Es de pago (~0,0002 USD por pregunta) y sólo
+  aparece si el `.env` tiene `ANTHROPIC_KEY`. Probarlo sin la página:
+  `uv run python -m gabriela.saber --ia "¿qué opinas de los exámenes?"`.
 - **Si contesta otra cosa**: el log muestra qué entendió y qué eligió
   (`gabriela.entender: «…» -> ¿…? (0.72)`). El arreglo es agregar esa forma
   de preguntar a `VARIANTES`.
@@ -63,7 +71,8 @@ energía acumulada, no según tiempo, así que las pausas del TTS no desfasan la
 
 ## Requisitos
 
-Todo corre en local; no hace falta ninguna clave de API.
+Todo corre en local; no hace falta ninguna clave de API (salvo `ANTHROPIC_KEY`
+para el switch «IA», que es opcional).
 
 - Python 3.13 y [uv](https://docs.astral.sh/uv/)
 - Una voz de referencia en `assets/voz/` para NeuTTS (ver más abajo), y en macOS
