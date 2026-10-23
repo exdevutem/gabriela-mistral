@@ -46,7 +46,11 @@ PIPER_MODELO = Path(os.getenv("PIPER_MODELO", VOZ / "piper" / "es_419-gabriela-m
 # --- Voz: NeuTTS nano-spanish (clonación a partir de un audio de referencia) ---
 # Reemplazó a F5-TTS el 20 de septiembre de 2026: misma voz de referencia, 2,8
 # veces más rápido en el mismo M2 (medido: RTF 4,08 -> 1,45).
-NEUTTS_REPO = os.getenv("NEUTTS_REPO", "neuphonic/neutts-nano-spanish")
+# Si está el backbone afinado con su voz (pipeline/afinar_neutts.py), ése; si
+# no, el de neuphonic. Ruta local o repo de Hugging Face. Ver assets/voz/README.md.
+_AFINADO = ASSETS / "models" / "neutts-gabriela"
+NEUTTS_REPO = os.getenv("NEUTTS_REPO", str(_AFINADO) if _AFINADO.is_dir()
+                        else "neuphonic/neutts-nano-spanish")
 NEUTTS_CODEC = os.getenv("NEUTTS_CODEC", "neuphonic/neucodec")
 REF_AUDIO = VOZ / "referencia.wav"
 REF_TEXTO = VOZ / "referencia.txt"
@@ -346,7 +350,10 @@ GRABADO_TEMPERATURA = float(os.getenv("NEUTTS_TEMPERATURA_GRABADA", "0.7"))
 # Ruta a un .gguf, o un repo de Hugging Face. El f16 lo genera
 # pipeline/convertir_gguf.py; el cuantizado oficial
 # (neuphonic/neutts-nano-spanish-q4-gguf) es gated aparte del modelo base.
-VIVO_GGUF = os.getenv("VIVO_GGUF", str(ASSETS / "models" / "neutts-nano-spanish-f16.gguf"))
+# Como NEUTTS_REPO: el afinado si está convertido, si no el base.
+_AFINADO_GGUF = ASSETS / "models" / "neutts-gabriela-f16.gguf"
+VIVO_GGUF = os.getenv("VIVO_GGUF", str(_AFINADO_GGUF) if _AFINADO_GGUF.exists()
+                      else str(ASSETS / "models" / "neutts-nano-spanish-f16.gguf"))
 # "auto" = Metal si lo hay, si no CPU. Cualquier cosa distinta de "cpu" manda
 # las capas del backbone a la GPU (llama.cpp elige Metal o CUDA según cómo se
 # compiló); el codec corre en el mismo dispositivo con torch.

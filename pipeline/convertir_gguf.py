@@ -7,6 +7,8 @@ repo en VIVO_GGUF y sale más pequeño y más rápido. Esto existe porque ese re
 *gated* aparte del modelo base.
 
     uv run pipeline/convertir_gguf.py
+    # el afinado con su voz (pipeline/afinar_neutts.py):
+    uv run pipeline/convertir_gguf.py assets/models/neutts-gabriela assets/models/neutts-gabriela-f16.gguf
 
 Dos arreglos que el conversor no hace solo, y sin los cuales no suena nada:
 
@@ -22,6 +24,7 @@ cuantizar a Q8_0/Q4_0 con `llama-quantize` es la mejora gratis si en el clúster
 """
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -38,8 +41,13 @@ DEFINIDO = 4  # tipo de token «definido por el usuario» en GGUF (3 es «de con
 
 
 def main() -> None:
-    SALIDA.parent.mkdir(parents=True, exist_ok=True)
-    origen = Path(snapshot_download(REPO))
+    p = argparse.ArgumentParser(description="Backbone de NeuTTS a GGUF f16.")
+    p.add_argument("origen", nargs="?", default=REPO, help="repo de Hugging Face o carpeta local")
+    p.add_argument("salida", nargs="?", type=Path, default=SALIDA)
+    a = p.parse_args()
+    salida = a.salida
+    salida.parent.mkdir(parents=True, exist_ok=True)
+    origen = Path(a.origen) if Path(a.origen).is_dir() else Path(snapshot_download(a.origen))
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         hf = tmp / "hf"
@@ -62,10 +70,10 @@ def main() -> None:
         subprocess.run(["git", "clone", "--depth", "1", "-q",
                         "https://github.com/ggml-org/llama.cpp.git", str(llama)], check=True)
         subprocess.run([sys.executable, str(llama / "convert_hf_to_gguf.py"), str(hf),
-                        "--outfile", str(SALIDA), "--outtype", "f16"],
+                        "--outfile", str(salida), "--outtype", "f16"],
                        check=True, env={"PYTHONPATH": str(llama / "gguf-py"), "PATH": "/usr/bin:/bin"})
 
-    r = GGUFReader(SALIDA, "r+")
+    r = GGUFReader(salida, "r+")
     tokens, tipos = r.fields["tokenizer.ggml.tokens"], r.fields["tokenizer.ggml.token_type"]
     n = 0
     for k, i in enumerate(tokens.data):
@@ -74,7 +82,7 @@ def main() -> None:
             n += 1
     r.data.flush()
     assert n == 65_536, f"esperaba 65 536 tokens de audio y encontré {n}"
-    print(f"listo: {SALIDA} ({SALIDA.stat().st_size / 1e6:.0f} MB)")
+    print(f"listo: {salida} ({salida.stat().st_size / 1e6:.0f} MB)")
 
 
 if __name__ == "__main__":
