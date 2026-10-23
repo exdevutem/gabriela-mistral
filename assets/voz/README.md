@@ -195,3 +195,104 @@ así que visemas, visor y lo ya grabado siguen sirviendo.
 - Medido en el M5 con la voz publicada `es_MX-ald-medium`, la base del
   afinado: **factor de tiempo real 0,022 en CPU**, unas 45 veces más rápido que
   hablar. NeuTTS está entre 1,08 y 1,45. Falta medirlo en el clúster.
+
+## NeuTTS afinado con su voz
+
+La clonación zero-shot adivina la voz a partir de 7,6 s de referencia, y a
+veces adivina mal: la «voz de hombre» que cazan `_puntuar` y `_mejor_toma`.
+Afinar el backbone de NeuTTS con horas de esa misma voz hace que la aprenda en
+vez de adivinarla. Todo local y gratis, en el M5 (MPS):
+`pipeline/afinar_neutts.py`.
+
+```bash
+uv run python pipeline/afinar_neutts.py preparar          # 33 min, una vez
+uv run python pipeline/afinar_neutts.py entrenar          # 600 pasos, 1 h 20 min; retoma si se corta
+uv run python pipeline/afinar_neutts.py exportar --paso 600
+uv run pipeline/convertir_gguf.py assets/models/neutts-gabriela assets/models/neutts-gabriela-f16.gguf
+uv run python pipeline/afinar_neutts.py evaluar base assets/models/neutts-gabriela
+```
+
+### Con qué datos
+
+- `dataset/` — las 1.566 frases de F5-TTS del plan de Piper (arriba), pasadas
+  por Whisper: las 31 con más de un 25 % de letras mal entendidas se quedan
+  fuera. Quedan 1.481.
+- `referencia-completa.wav` — los 67 s de la locutora real que siguen a
+  `referencia.wav`, cortados en 8 frases con su transcripción a mano (en el
+  script, `LOCUCION`) y repetidas 8 veces: ~10 % del entrenamiento, y es la
+  voz de verdad y no la de la maestra.
+- Las `frec-*` del dataset **no se entrenan**: son las respuestas de
+  `FRECUENTES`, y sirven de validación (66) y de evaluación limpia.
+
+Nada de grabaciones de Gabriela Mistral: la voz sigue siendo la recreación de
+la locutora del museo.
+
+### Cómo
+
+La receta de neuphonic (`TRAINING.md` y `examples/finetune.py` en
+github.com/neuphonic/neutts): fine-tuning completo del backbone —son 230 M de
+parámetros, no hace falta LoRA— con transformers y los códigos de NeuCodec
+como objetivo. Dos cambios:
+
+- Cada ejemplo lleva delante **el mismo prompt que la inferencia**:
+  `referencia.wav` y su texto, armado con `NeuTTS._apply_chat_template`. La
+  pérdida cuenta sólo los códigos de la frase.
+- La pérdida se calcula sólo donde hay etiqueta, con gradient checkpointing y
+  vaciando la caché de MPS en cada paso: así un lote de 8 cabe en ~6 GB. Sin
+  eso pasa de 24 GB y el Mac se va a swap.
+
+AdamW a 2e-5, coseno con 30 pasos de calentamiento, lotes de 8, 600 pasos
+(3 épocas), fp32: 7 s por paso. La pérdida de validación bajó de 7,22 a 5,05 y
+está plana desde el paso 450. Los checkpoints quedan en
+`assets/models/neutts-gabriela-ckpt/paso-*` y el exportado, en bf16 (457 MB),
+en `assets/models/neutts-gabriela/` con la licencia de neuphonic al lado
+(`LICENCE` y `NOTICE`: es obra derivada y la NeuTTS Open License lo exige).
+
+### Cuánto mejora
+
+Medido el 23 de octubre de 2026 en el M5, con `evaluar`: las 87 frases de
+`FRECUENTES` dos veces cada una (semillas 0 y 1), **una sola toma**, sin
+repetir. «Pasan» es la nota de `_puntuar` ≥ `GRABADO_ACEPTABLE` (0,6); «tono
+ajeno», a más de 4 semitonos de la referencia; el CER es lo que entiende
+Whisper (`whisper-small`) contra el texto, con las cifras pasadas a letras.
+
+Backbone en transformers sobre MPS (lo que usa `voice.py` para grabar):
+
+| modelo | temperatura | nota media | pasan a la 1.ª | tono ajeno | CER | tiempo real |
+|---|---|---|---|---|---|---|
+| base     | 1,0 | 0,73 | 78 % | 4 % | 3,7 % | 0,75 |
+| base     | 0,7 | 0,72 | 72 % | 3 % | 2,8 % | 0,79 |
+| afinado  | 1,0 | 0,87 | 95 % | 1 % | 1,8 % | 0,77 |
+| afinado  | 0,7 | 0,86 | 94 % | 1 % | 2,5 % | 0,76 |
+
+El paso 300 da casi lo mismo (94 %, 0 % de tono ajeno): más pasos no
+estropean, pero tampoco hacen falta.
+
+GGUF f16 sobre llama.cpp con Metal (lo que usa `vivo.py`):
+
+| modelo | temperatura | nota media | pasan a la 1.ª | tono ajeno | CER | tiempo real |
+|---|---|---|---|---|---|---|
+| base     | 1,0 | 0,75 | 79 % | 1 % | 5,0 % | 0,42 |
+| base     | 0,7 | 0,72 | 76 % | 2 % | 9,2 % | 0,42 |
+| afinado  | 1,0 | 0,89 | 96 % | 0 % | 3,3 % | 0,42 |
+| afinado  | 0,7 | 0,88 | 94 % | 0 % | 2,0 % | 0,42 |
+
+En vivo, eso es que la primera toma —la única que oye el visitante sin
+esperar— casi siempre sirve: con el base, una de cada cinco frases largas se
+repetía (`VIVO_INTENTOS`) y costaba otra síntesis de latencia.
+
+Las tomas que fallan a la primera siguen pasando por `_mejor_toma` y por los
+reintentos de `vivo.py`, que quedan igual: ahora casi nunca hacen falta.
+
+### Usarlo
+
+No hay que configurar nada: si existen `assets/models/neutts-gabriela/` y
+`assets/models/neutts-gabriela-f16.gguf`, `NEUTTS_REPO` y `VIVO_GGUF` los usan
+por defecto; si no, el modelo de neuphonic, como antes. Para volver al base
+con los afinados presentes, `NEUTTS_REPO=neuphonic/neutts-nano-spanish` y
+`VIVO_GGUF=assets/models/neutts-nano-spanish-f16.gguf`. En Docker, monta las
+dos cosas en el volumen y apunta las variables a esas rutas.
+
+Lo ya grabado (`frecuentes/`, `respaldo/`) no se toca: está en disco y el
+servidor no lo regraba. Para regrabarlo con la voz afinada, borra la carpeta
+con su `notas.json`.
