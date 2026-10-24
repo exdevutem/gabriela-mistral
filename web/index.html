@@ -155,6 +155,7 @@ function conectar() {
   ws.onmessage = alMensaje;
   ws.onopen = () => { reintentos = 0; };
   ws.onclose = () => {
+    dejarDePensar();
     dicho.className = 'error';
     dicho.textContent = 'Se cortó la conexión con el servidor. Reconectando…';
     ocupado(true);
@@ -205,8 +206,29 @@ if (avatar) {
   barra.onchange = () => { a.currentTime = Number(barra.value); arrastrando = false; pintar(); };
 }
 
+// Mientras piensa, como Claude: frases del museo que se van turnando, para que
+// la espera se lea como que ella está buscando, no como un kiosco colgado.
+const PENSANDO = [
+  'Consultando los libros', 'Viendo imágenes', 'Recordando el pasado',
+  'Hojeando cuadernos viejos', 'Buscando en el archivo', 'Desempolvando mapas',
+  'Releyendo cartas', 'Repasando apuntes de clase', 'Mirando fotografías de la escuela',
+  'Abriendo el pupitre', 'Volviendo al valle de Elqui', 'Afilando el lápiz',
+];
+let pensamiento = 0;
+function pensar() {
+  dejarDePensar();
+  const turno = () => {
+    dicho.className = 'pensando';
+    dicho.textContent = `${PENSANDO[Math.floor(Math.random() * PENSANDO.length)]}…`;
+  };
+  turno();
+  pensamiento = setInterval(turno, 1800);
+}
+function dejarDePensar() { clearInterval(pensamiento); pensamiento = 0; }
+
 function alMensaje({ data }) {
   const m = JSON.parse(data);
+  if (m.tipo !== 'pensando') dejarDePensar();
   if (m.tipo === 'listo')    {
     dicho.className = avisoRetrato ? 'error' : '';
     dicho.textContent = avisoRetrato;
@@ -225,7 +247,7 @@ function alMensaje({ data }) {
     }
     ocupado(false);
   }
-  if (m.tipo === 'pensando') { dicho.className = 'pensando'; dicho.textContent = 'pensando…'; }
+  if (m.tipo === 'pensando') pensar();
   if (m.tipo === 'parcial' && grabando) {
     // Lo que Whisper va entendiendo mientras el visitante todavía habla.
     dicho.className = 'escuchando';
