@@ -521,6 +521,113 @@ def test_si_no_hay_frecuente_contesta_el_llm_y_si_no_el_respaldo():
          server.saber.disponible, server.saber.responder, server.vivo.sintetizar) = reales
 
 
+def test_en_modo_ia_contesta_claude_y_no_carga_nada_local():
+    # En modo IA (gabriela --ia), ni frecuentes grabadas, ni documentos, ni LLM
+    # local: ni se cargan al arrancar, y hasta un badge va a Claude, que suena
+    # con la voz en vivo. Si Claude se niega o se corta, no se dice media
+    # respuesta.
+    import asyncio
+    from types import SimpleNamespace
+
+    import gabriela.saber as saber
+    import gabriela.server as server
+
+    pedidos, mandados = [], []
+
+    class WS:
+        async def send_json(self, m):
+            mandados.append(m)
+
+    def respuesta(stop_reason, texto):
+        return SimpleNamespace(stop_reason=stop_reason,
+                               content=[SimpleNamespace(type="text", text=texto)])
+
+    claude = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: pedidos.append(kw)
+                                                      or respuesta(*salida)))
+    prohibido = lambda *a, **k: 1 / 0  # noqa: E731
+    cargados = []
+    reales = (saber._claude, server.frecuentes, server.respaldo, saber.buscar,
+              saber.responder, server.vivo.sintetizar, server.config.IA, server.calentar,
+              saber.calentar, server.entender.calentar, server.vivo.calentar, server.ANTHROPIC_KEY)
+    saber._claude = lambda: claude
+    server.frecuentes = server.respaldo = saber.buscar = saber.responder = prohibido
+    # Registran en vez de fallar: ciclo() atrapa las excepciones de cada paso.
+    server.calentar = lambda: cargados.append("grabar")
+    saber.calentar = lambda: cargados.append("llm")
+    server.entender.calentar = lambda elector=True: cargados.append(("whisper", elector))
+    server.vivo.calentar = lambda: cargados.append("voz")
+    server.vivo.sintetizar = lambda frase: b"\x00\x00" * 16_000
+    server.config.IA, server.ANTHROPIC_KEY = True, "clave"
+    try:
+        async def arrancar():
+            async with server.ciclo(None):
+                pass
+        asyncio.run(arrancar())
+        assert cargados == [("whisper", False), "voz"], cargados
+        salida = ("end_turn", "Esta casa fue escuela.\n Mira a tu alrededor.")
+        asyncio.run(server._responder(WS(), "¿Qué fue este edificio?"))
+        assert pedidos[0]["model"] == saber.IA_MODELO
+        assert pedidos[0]["messages"] == [{"role": "user", "content": "¿Qué fue este edificio?"}]
+        # Las respuestas verificadas van fijas en el prompt: es lo que le impide
+        # inventar datos del museo.
+        sistema = pedidos[0]["system"][0]
+        assert all(r in sistema["text"] for _, r in saber.FRECUENTES)
+        assert sistema["cache_control"] == {"type": "ephemeral"}, sistema
+        textos = [m for m in mandados if m["tipo"] == "texto"]
+        assert textos[0]["texto"] == "Esta casa fue escuela. Mira a tu alrededor.", textos
+        assert mandados[-1]["tipo"] == "habla" and mandados[-1]["fin"], mandados[-1]
+        salida = ("refusal", "Eso no")
+        assert saber.responder_ia("¿qué hora es?") is None
+    finally:
+        (saber._claude, server.frecuentes, server.respaldo, saber.buscar,
+         saber.responder, server.vivo.sintetizar, server.config.IA, server.calentar,
+         saber.calentar, server.entender.calentar, server.vivo.calentar,
+         server.ANTHROPIC_KEY) = reales
+
+
+def test_la_voz_en_vivo_espera_al_principio_y_no_se_corta_al_medio():
+    # Si sintetizar va más lento que hablar, el audio se junta antes de mandar
+    # nada: mejor una espera al principio que una pausa a media respuesta. Si va
+    # rápido, la primera unidad sale enseguida y las demás según se hacen.
+    import asyncio
+    from types import SimpleNamespace
+
+    import gabriela.server as server
+
+    un_segundo = b"\x00\x00" * SAMPLE_RATE
+    ahora = [0.0]
+    texto = "Primera frase de la respuesta. Segunda frase, bastante más larga que la primera. Tercera."
+
+    def hablas(segundos_por_unidad):
+        mandados = []
+
+        class WS:
+            async def send_json(self, m):
+                mandados.append(m)
+
+        def sintetizar(frase):
+            ahora[0] += segundos_por_unidad
+            return un_segundo
+
+        reales = server.vivo.sintetizar, server.time
+        server.vivo.sintetizar = sintetizar
+        server.time = SimpleNamespace(monotonic=lambda: ahora[0])
+        try:
+            asyncio.run(server._decir(WS(), texto))
+        finally:
+            server.vivo.sintetizar, server.time = reales
+        return [m for m in mandados if m["tipo"] == "habla"]
+
+    unidades = server.vivo.unidades(texto)
+    assert len(unidades) == 3, unidades
+    resumen = lambda hs: [(h["duracion"], h["continuacion"], h["fin"]) for h in hs]  # noqa: E731
+    # 10 s de síntesis por cada segundo de voz: nunca alcanza, sale todo junto.
+    assert resumen(hablas(10.0)) == [(3.0, False, True)], resumen(hablas(10.0))
+    rapido = resumen(hablas(0.1))
+    assert rapido == [(1.0, False, False), (1.0, True, False), (1.0, True, True)], rapido
+    assert server._alcanza(3.0, 1.0, 10, 20) and not server._alcanza(2.0, 1.0, 10, 20)
+
+
 def test_el_corpus_se_fragmenta_sin_perder_texto_ni_pasarse():
     sys.path.insert(0, "pipeline")
     from conocimiento import CORTO, LARGO, fragmentar

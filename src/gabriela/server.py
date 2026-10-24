@@ -5,6 +5,9 @@ frecuentes (entender.py) y, si una se parece, suena su respuesta grabada:
 siempre la misma, verificada y al instante. Si ninguna se parece, un LLM local
 contesta con los documentos oficiales del museo (saber.py) y lo dice con la voz
 en vivo (vivo.py); si tampoco ahí hay nada, suena el «no te entendí» grabado.
+Arrancado en modo IA (`gabriela --ia`) no se usa ni se carga nada de eso: todo
+lo contesta Claude Haiku, y sólo la voz (y Whisper, si habló al micrófono)
+sigue siendo local.
 """
 from __future__ import annotations
 
@@ -13,13 +16,14 @@ import base64
 import contextlib
 import json
 import logging
+import time
 
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import entender, saber, vivo
-from .config import ASSETS, RESPALDO, UMBRAL, WEB
+from . import config, entender, saber, vivo
+from .config import ANTHROPIC_KEY, ASSETS, FRECUENTES, RESPALDO, UMBRAL, VIVO_COLCHON, WEB
 from .visemes import VISEMAS, timeline
 from .voice import SAMPLE_RATE, a_wav, calentar, frecuentes, respaldo
 
@@ -39,12 +43,21 @@ async def ciclo(_app):
 
     Grabar es largo sólo la primera vez (unos siete minutos con NeuTTS); después
     queda en disco. Whisper y el elector son ~1,5 GB que no deben cargarse con
-    alguien hablándole.
+    alguien hablándole. En modo IA no se graba ni se carga nada de lo local:
+    sólo Whisper, para el micrófono, y la voz en vivo.
     """
-    for nombre, paso in (("grabar las respuestas", calentar),
-                         ("cargar Whisper y el elector", entender.calentar),
-                         ("cargar los documentos y el LLM", saber.calentar),
-                         ("cargar la voz en vivo", vivo.calentar)):
+    if config.IA:
+        if not ANTHROPIC_KEY:
+            raise RuntimeError("el modo IA necesita ANTHROPIC_KEY en el .env")
+        log.info("modo IA: contesta %s; no se carga el modelo local", saber.IA_MODELO)
+        pasos = (("cargar Whisper", lambda: entender.calentar(elector=False)),
+                 ("cargar la voz en vivo", vivo.calentar))
+    else:
+        pasos = (("grabar las respuestas", calentar),
+                 ("cargar Whisper y el elector", entender.calentar),
+                 ("cargar los documentos y el LLM", saber.calentar),
+                 ("cargar la voz en vivo", vivo.calentar))
+    for nombre, paso in pasos:
         try:
             log.info("preparando: %s…", nombre)
             await asyncio.to_thread(paso)
@@ -118,9 +131,29 @@ def _elegir(dicho: str, grabadas) -> str | None:
     return entender.elegir(dicho, grabadas, umbral)
 
 
+async def _responder_ia(ws: WebSocket, dicho: str) -> None:
+    """Lo que diga Claude, con la voz en vivo. Ni frecuentes ni documentos:
+    en modo IA, hasta un badge lo contesta Claude."""
+    await ws.send_json({"tipo": "pensando"})
+    texto = await asyncio.to_thread(saber.responder_ia, dicho)
+    if not texto:
+        await ws.send_json({"tipo": "error", "texto": "No supe qué contestarte. "
+                                                       "Pregúntame de otra forma."})
+        return
+    try:
+        await _decir(ws, texto)
+    except Exception:
+        log.exception("no pude decir la respuesta de Claude")
+        await ws.send_json({"tipo": "error", "texto": texto})
+
+
 async def _responder(ws: WebSocket, dicho: str) -> None:
     """Hace sonar la frecuente que corresponde a `dicho`; si no hay, lo que
-    digan los documentos del museo; y si tampoco, el respaldo."""
+    digan los documentos del museo; y si tampoco, el respaldo. En modo IA,
+    todo lo contesta Claude."""
+    if config.IA:
+        await _responder_ia(ws, dicho)
+        return
     grabadas = frecuentes()
     # Un badge manda la pregunta tal cual: no hace falta preguntarle a nadie.
     pregunta = dicho if dicho in grabadas else await asyncio.to_thread(_elegir, dicho, grabadas)
@@ -155,18 +188,44 @@ async def _responder(ws: WebSocket, dicho: str) -> None:
 async def _decir(ws: WebSocket, texto: str, fuentes: list[str] | None = None) -> None:
     """Dice `texto` con su voz, sintetizada al momento.
 
-    Manda una `habla` por unidad según se sintetiza: el visor las encadena, así
-    que empieza a sonar la primera mientras se hacen las demás. De dónde sale el
-    texto (quien lo mande, o el LLM de saber.py) no es asunto de este camino;
-    `fuentes` son las URL de los documentos de donde salió, para mostrarlas.
+    Transmite el audio por unidades, que el visor encadena, pero con un colchón
+    al principio: no manda nada hasta que lo ya sintetizado alcance a cubrir lo
+    que falta, al ritmo medido en esta misma respuesta (`_alcanza`). Una unidad
+    larga, o una que el juez de vivo.py manda a repetir, tarda más de lo que
+    dura la anterior, y sin colchón la voz se cortaba a media respuesta. Desde
+    que empieza, cada unidad sale apenas está lista. El texto sale junto con el
+    primer audio: mientras tanto el visor sigue mostrando que piensa, en vez de
+    un texto que no suena.
+
+    De dónde sale el texto (quien lo mande, o un LLM de saber.py) no es asunto
+    de este camino; `fuentes` son las URL de los documentos de donde salió.
     """
     unidades = vivo.unidades(texto)
-    await ws.send_json({"tipo": "texto", "texto": " ".join(unidades),
-                        "fuentes": fuentes or []})
+    total, hecho, t0 = sum(map(len, unidades)), 0, time.monotonic()
+    pendientes: list[tuple[str, bytes]] = []
+    enviadas = 0
     for i, frase in enumerate(unidades):
         pcm = await asyncio.to_thread(vivo.sintetizar, frase)
-        await ws.send_json(_habla([(frase, pcm)], continuacion=i > 0,
-                                  fin=i == len(unidades) - 1))
+        pendientes.append((frase, pcm))
+        hecho += len(frase)
+        ultima = i == len(unidades) - 1
+        if not enviadas and not ultima:
+            colchon = sum(len(p) for _, p in pendientes) / 2 / SAMPLE_RATE
+            if not _alcanza(colchon, time.monotonic() - t0, hecho, total - hecho):
+                continue
+        if not enviadas:
+            await ws.send_json({"tipo": "texto", "texto": " ".join(unidades),
+                                "fuentes": fuentes or []})
+        await ws.send_json(_habla(pendientes, continuacion=enviadas > 0, fin=ultima))
+        enviadas += 1
+        pendientes = []
+
+
+def _alcanza(colchon: float, sintesis: float, hecho: int, falta: int) -> bool:
+    """Si `colchon` segundos de audio cubren lo que falta sintetizar (`falta`
+    caracteres), al ritmo de `sintesis` segundos por `hecho` caracteres que
+    lleva esta respuesta, con VIVO_COLCHON de margen."""
+    return colchon >= falta * sintesis / hecho * VIVO_COLCHON
 
 
 async def _parcial(ws: WebSocket, pcm: bytes) -> None:
@@ -190,9 +249,10 @@ async def conversar(ws: WebSocket) -> None:
     """
     await ws.accept()
     # Sólo se ofrecen las que están grabadas: un badge que lleva a una respuesta
-    # a medio grabar es peor que no ofrecerlo.
-    await ws.send_json({"tipo": "listo", "visemas": VISEMAS,
-                        "frecuentes": list(frecuentes())})
+    # a medio grabar es peor que no ofrecerlo. En modo IA no se graba nada y
+    # los badges son sugerencias que contesta Claude.
+    badges = [p for p, _ in FRECUENTES] if config.IA else list(frecuentes())
+    await ws.send_json({"tipo": "listo", "visemas": VISEMAS, "frecuentes": badges})
     voz = bytearray()
     parcial: asyncio.Task | None = None
     while True:

@@ -293,6 +293,19 @@ SABER_UMBRAL = float(os.getenv("SABER_UMBRAL", "0.5"))
 # contestar ella con lo grabado. Ver saber.piso().
 SABER_MARGEN = float(os.getenv("SABER_MARGEN", "0.05"))
 
+# --- IA: Claude Haiku (saber.py, sólo arrancando con `gabriela --ia`) ---
+# En modo IA todo lo contesta Claude Haiku —ni frecuentes grabadas, ni
+# documentos, ni LLM local, que ni se cargan— y suena con la voz en vivo. Se
+# elige al arrancar (ver __main__.py); MODO=ia sirve para uvicorn a mano o Docker.
+IA = os.getenv("MODO", "local") == "ia"
+# Sin clave, el modo IA no arranca. Es de pago (octubre de 2026: 0,10 USD
+# por millón de tokens de entrada y 0,50 de salida, ~0,0002 USD por pregunta).
+# La clave ya pertenece a un workspace: no hace falta su id para llamar.
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
+IA_MODELO = os.getenv("IA_MODELO", "claude-haiku-5-5")
+# low: contesta antes y para dos o tres frases no hace falta pensar más.
+IA_ESFUERZO = os.getenv("IA_ESFUERZO", "low")
+
 # El mundo físico necesita perillas.
 # "auto" = mps si la máquina lo tiene, cpu si no. Se resuelve en voice.py, que
 # es donde torch ya está cargado. Medido en un M2 el 20 de septiembre de 2026,
@@ -362,3 +375,9 @@ VIVO_DEVICE = os.getenv("VIVO_DEVICE", "auto")
 # hasta esta cantidad de veces en total. Cada repetición cuesta ~0,3 s por
 # segundo de audio; sin esto, la «voz de hombre» de NeuTTS llega al visitante.
 VIVO_INTENTOS = int(os.getenv("VIVO_INTENTOS", "3"))
+# Antes de que empiece a sonar se junta audio hasta que alcance a cubrir lo que
+# falta por sintetizar, al ritmo medido en esa misma respuesta y multiplicado
+# por esto: mejor esperar al principio que cortarse a media respuesta. Subirlo
+# si todavía se corta (p. ej. con la GPU compartida); bajarlo si la espera
+# inicial se hace larga.
+VIVO_COLCHON = float(os.getenv("VIVO_COLCHON", "1.3"))

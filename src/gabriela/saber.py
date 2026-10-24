@@ -16,7 +16,11 @@ llama.cpp, contesta con lo que dicen esos fragmentos:
    que un «no te entendí». Es el único dato que se puede comprobar sin
    entender el texto, y es justo el que un modelo pequeño inventa.
 
+En modo IA (`gabriela --ia`) no pasa nada de esto: responder_ia() le pregunta
+directo a Claude Haiku, sin fragmentos ni modelo local.
+
     uv run python -m gabriela.saber "¿qué es la exposición retrospectiva?"
+    uv run python -m gabriela.saber --ia "¿qué opinas de los exámenes?"
 """
 from __future__ import annotations
 
@@ -31,8 +35,10 @@ from functools import lru_cache
 
 import numpy as np
 
-from .config import (CONOCIMIENTO, EMBEDDINGS_MODELO, LLM_CTX, LLM_DEVICE, LLM_FRAGMENTOS,
-                     LLM_GGUF, LLM_MAX_TOKENS, SABER_MARGEN, SABER_UMBRAL)
+from .config import (ANTHROPIC_KEY, CONOCIMIENTO, EMBEDDINGS_MODELO, FRECUENTES, IA_ESFUERZO,
+                     IA_MODELO,
+                     LLM_CTX, LLM_DEVICE, LLM_FRAGMENTOS, LLM_GGUF, LLM_MAX_TOKENS,
+                     SABER_MARGEN, SABER_UMBRAL)
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +55,28 @@ SISTEMA = (
     "que no estén en ellos. No empieces con «Sí» ni repitas la pregunta, y no "
     "ofrezcas hacer nada por el visitante: sólo cuentas lo que sabes. "
     f"Si los fragmentos no responden la pregunta, contesta sólo {NO_SE}."
+)
+# En modo IA contesta Claude solo, sin fragmentos. Lo que no se le deja
+# es inventar: lleva fijas las respuestas verificadas de FRECUENTES, que mandan
+# sobre lo que él crea saber. Sin ellas confundía el edificio con la Escuela
+# Normal de Preceptores.
+SISTEMA_IA = (
+    "Eres Gabriela Mistral (Lucila Godoy Alcayaga, 1889-1957), maestra y poeta "
+    "chilena. Un visitante del Museo de la Educación Gabriela Mistral, en "
+    "Santiago, te habla. Contesta en español de Chile, en primera persona, con "
+    "una a tres frases cortas y sencillas, que se van a decir en voz alta: sin "
+    "listas, sin formato, sin emojis, y los números escritos con letras («el año "
+    "cuarenta y cinco»). Contesta con lo que se sabe con certeza de tu vida, tu "
+    "obra y el museo. No inventes fechas, nombres ni cifras: si no lo sabes, "
+    "dilo con tus palabras, sin explicar que no quieres inventar. Si te preguntan algo que no tiene que ver contigo ni con el museo, "
+    "contéstalo en una frase, como lo haría ella, y vuelve a la escuela o al "
+    "museo. No ofrezcas hacer nada por el visitante: sólo conversas. Trátalo "
+    "siempre de tú, nunca de usted («mira», no «mire»), y sin suponer si es "
+    "hombre o mujer (nada de «mijito» ni «mijita»).\n\n"
+    "Estos son datos verificados por el museo, dichos con tu voz. Úsalos tal "
+    "cual cuando la pregunta los toque, y si algo que crees saber los "
+    "contradice, mandan ellos:\n\n"
+    + "\n".join(f"- {p} {r}" for p, r in FRECUENTES)
 )
 
 
@@ -159,6 +187,37 @@ def comprobar(respuesta: str, contexto: str) -> str | None:
     return texto
 
 
+@lru_cache(maxsize=1)
+def _claude():
+    import anthropic
+
+    # Un visitante esperando: mejor el «no te entendí» grabado que un minuto de
+    # reintentos.
+    return anthropic.Anthropic(api_key=ANTHROPIC_KEY, timeout=15.0, max_retries=1)
+
+
+def responder_ia(pregunta: str) -> str | None:
+    """Lo que contesta Claude Haiku a la pregunta tal cual, o None si se negó o
+    se cortó: media respuesta no se dice en voz alta.
+
+    ponytail: sin comprobar(): escribe los números con letras, así que el filtro
+    no tendría qué mirar. Si alguna vez inventa, se ajusta SISTEMA_IA.
+    """
+    t = time.time()
+    r = _claude().messages.create(
+        model=IA_MODELO, max_tokens=2000,
+        # El prompt es fijo: cacheado, cada pregunta lo relee más barato y antes.
+        # La marca va en él y no arriba, que caería en la pregunta y no
+        # reusaría nada.
+        system=[{"type": "text", "text": SISTEMA_IA, "cache_control": {"type": "ephemeral"}}],
+        output_config={"effort": IA_ESFUERZO},
+        messages=[{"role": "user", "content": pregunta}])
+    texto = " ".join("".join(b.text for b in r.content if b.type == "text").split())
+    log.info("«%s» -> «%s» (%s, %s, %.1f s)", pregunta, texto, IA_MODELO, r.stop_reason,
+             time.time() - t)
+    return texto if r.stop_reason == "end_turn" and texto else None
+
+
 def responder(pregunta: str) -> tuple[str | None, list[str]]:
     """(respuesta, urls de sus fuentes), o (None, []) si no hay nada que decir
     con seguridad sobre eso."""
@@ -205,6 +264,10 @@ if __name__ == "__main__":
     import sys
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    if sys.argv[1:2] == ["--ia"]:
+        for p in sys.argv[2:]:
+            print(f"{p!r} -> {responder_ia(p)}")
+        sys.exit()
     for p in sys.argv[1:]:
         for f, parecido in buscar(p):
             print(f"  {parecido:.2f}  {f['url']}\n        {f['texto'][:110]}…")

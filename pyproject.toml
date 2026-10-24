@@ -24,7 +24,12 @@ dependencies = [
     # hace falta cmake (`brew install cmake`).
     "llama-cpp-python>=0.3.16",
     "gguf",
+    # Claude Haiku, sólo con el switch «IA» de la página (saber.py).
+    "anthropic>=2.3.0",
 ]
+
+[project.scripts]
+gabriela = "gabriela.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
