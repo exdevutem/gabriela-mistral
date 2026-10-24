@@ -16,10 +16,8 @@ llama.cpp, contesta con lo que dicen esos fragmentos:
    que un «no te entendí». Es el único dato que se puede comprobar sin
    entender el texto, y es justo el que un modelo pequeño inventa.
 
-Con el switch «IA» de la página, el paso 3 lo hace Claude Haiku en vez del
-modelo local: mismos fragmentos, pero contesta aunque ninguno pase el umbral
-(con lo que se sabe de ella, o diciendo que eso no lo sabe) y sin el filtro de
-números, porque los escribe con letras para la voz.
+Con el switch «IA» de la página no pasa nada de esto: responder_ia() le
+pregunta directo a Claude Haiku, sin fragmentos ni modelo local.
 
     uv run python -m gabriela.saber "¿qué es la exposición retrospectiva?"
     uv run python -m gabriela.saber --ia "¿qué opinas de los exámenes?"
@@ -57,22 +55,21 @@ SISTEMA = (
     "ofrezcas hacer nada por el visitante: sólo cuentas lo que sabes. "
     f"Si los fragmentos no responden la pregunta, contesta sólo {NO_SE}."
 )
-# Claude sabe más de ella que lo que traen los fragmentos y redacta mejor, así
-# que se le deja contestar con eso; lo que no se le deja es inventar.
+# Con el switch «IA» contesta Claude solo, con lo que sabe de ella: sin
+# fragmentos. Lo que no se le deja es inventar.
 SISTEMA_IA = (
     "Eres Gabriela Mistral (Lucila Godoy Alcayaga, 1889-1957), maestra y poeta "
     "chilena. Un visitante del Museo de la Educación Gabriela Mistral, en "
     "Santiago, te habla. Contesta en español de Chile, en primera persona, con "
     "una a tres frases cortas y sencillas, que se van a decir en voz alta: sin "
     "listas, sin formato, sin emojis, y los números escritos con letras («el año "
-    "cuarenta y cinco»). Apóyate en los fragmentos de documentos del museo cuando "
-    "traigan la respuesta; si no, en lo que se sabe con certeza de tu vida y tu "
-    "obra. No inventes fechas, nombres ni cifras: si no lo sabes, dilo con tus "
-    "palabras. Si te preguntan algo que no tiene que ver contigo ni con el museo, "
+    "cuarenta y cinco»). Contesta con lo que se sabe con certeza de tu vida, tu "
+    "obra y el museo. No inventes fechas, nombres ni cifras: si no lo sabes, "
+    "dilo con tus palabras. Si te preguntan algo que no tiene que ver contigo ni con el museo, "
     "contéstalo en una frase, como lo haría ella, y vuelve a la escuela o al "
     "museo. No ofrezcas hacer nada por el visitante: sólo conversas. Trátalo "
-    "de tú y sin suponer si es hombre o mujer (nada de «mijito» ni «mijita»). "
-    "No menciones los fragmentos ni los documentos: habla de lo que sabes."
+    "siempre de tú, nunca de usted («mira», no «mire»), y sin suponer si es "
+    "hombre o mujer (nada de «mijito» ni «mijita»)."
 )
 
 
@@ -192,45 +189,45 @@ def _claude():
     return anthropic.Anthropic(api_key=ANTHROPIC_KEY, timeout=15.0, max_retries=1)
 
 
-def _preguntar_a_claude(pedido: str) -> str:
-    """Lo que contesta Claude Haiku, o "" si no terminó de contestar."""
+def responder_ia(pregunta: str) -> str | None:
+    """Lo que contesta Claude Haiku a la pregunta tal cual, o None si se negó o
+    se cortó: media respuesta no se dice en voz alta.
+
+    ponytail: sin comprobar(): escribe los números con letras, así que el filtro
+    no tendría qué mirar. Si alguna vez inventa, se ajusta SISTEMA_IA.
+    """
+    t = time.time()
     r = _claude().messages.create(
         model=IA_MODELO, max_tokens=2000, system=SISTEMA_IA,
         output_config={"effort": IA_ESFUERZO},
-        messages=[{"role": "user", "content": pedido}])
-    if r.stop_reason != "end_turn":
-        # refusal o max_tokens: media respuesta no se dice en voz alta.
-        log.info("Claude terminó con %s", r.stop_reason)
-        return ""
-    return "".join(b.text for b in r.content if b.type == "text")
+        messages=[{"role": "user", "content": pregunta}])
+    texto = " ".join("".join(b.text for b in r.content if b.type == "text").split())
+    log.info("«%s» -> «%s» (%s, %s, %.1f s)", pregunta, texto, IA_MODELO, r.stop_reason,
+             time.time() - t)
+    return texto if r.stop_reason == "end_turn" and texto else None
 
 
-def responder(pregunta: str, ia: bool = False) -> tuple[str | None, list[str]]:
+def responder(pregunta: str) -> tuple[str | None, list[str]]:
     """(respuesta, urls de sus fuentes), o (None, []) si no hay nada que decir
-    con seguridad sobre eso. Con `ia`, contesta Claude Haiku en vez del LLM
-    local."""
+    con seguridad sobre eso."""
     encontrados = [(f, p) for f, p in buscar(pregunta) if p >= SABER_UMBRAL]
-    if not encontrados and not ia:
+    if not encontrados:
         log.info("«%s»: ningún fragmento pasa de %.2f", pregunta, SABER_UMBRAL)
         return None, []
     contexto = "\n\n".join(f"[{i}] {f['texto']}" for i, (f, _) in enumerate(encontrados, 1))
-    pedido = f"Fragmentos:\n{contexto or '(ninguno)'}\n\nPregunta del visitante: {pregunta}"
+    mensajes = [
+        {"role": "system", "content": SISTEMA},
+        {"role": "user", "content": f"Fragmentos:\n{contexto}\n\nPregunta del visitante: {pregunta}"},
+    ]
     t = time.time()
-    if ia:
-        crudo = _preguntar_a_claude(pedido)
-        # ponytail: sin comprobar(): escribe los números con letras, así que el
-        # filtro no tendría qué mirar. Si alguna vez inventa, se ajusta SISTEMA_IA.
-        texto = " ".join(crudo.split()) or None
-    else:
-        with _candado:
-            salida = _modelo().create_chat_completion(
-                [{"role": "system", "content": SISTEMA}, {"role": "user", "content": pedido}],
-                max_tokens=LLM_MAX_TOKENS, temperature=0.2, top_p=0.9, repeat_penalty=1.1)
-        crudo = salida["choices"][0]["message"]["content"] or ""
-        texto = comprobar(crudo, contexto)
-    log.info("«%s» -> «%s» (%s, %.1f s, mejor fragmento %.2f)", pregunta, texto or crudo,
-             IA_MODELO if ia else "local", time.time() - t,
-             encontrados[0][1] if encontrados else 0.0)
+    with _candado:
+        salida = _modelo().create_chat_completion(
+            mensajes, max_tokens=LLM_MAX_TOKENS, temperature=0.2, top_p=0.9,
+            repeat_penalty=1.1)
+    crudo = salida["choices"][0]["message"]["content"] or ""
+    texto = comprobar(crudo, contexto)
+    log.info("«%s» -> «%s» (%.1f s, mejor fragmento %.2f)", pregunta, texto or crudo,
+             time.time() - t, encontrados[0][1])
     fuentes = list(dict.fromkeys(f["url"] for f, _ in encontrados))
     return texto, (fuentes if texto else [])
 
@@ -261,8 +258,11 @@ if __name__ == "__main__":
     import sys
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    ia = "--ia" in sys.argv
-    for p in (a for a in sys.argv[1:] if a != "--ia"):
+    if sys.argv[1:2] == ["--ia"]:
+        for p in sys.argv[2:]:
+            print(f"{p!r} -> {responder_ia(p)}")
+        sys.exit()
+    for p in sys.argv[1:]:
         for f, parecido in buscar(p):
             print(f"  {parecido:.2f}  {f['url']}\n        {f['texto'][:110]}…")
-        print(f"{p!r} -> {responder(p, ia)}")
+        print(f"{p!r} -> {responder(p)}")

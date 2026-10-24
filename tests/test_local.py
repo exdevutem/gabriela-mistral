@@ -495,7 +495,7 @@ def test_si_no_hay_frecuente_contesta_el_llm_y_si_no_el_respaldo():
     server.saber.disponible = lambda: True
     server.vivo.sintetizar = lambda frase: un_segundo
     try:
-        server.saber.responder = lambda p, ia=False: ("Fue en mil novecientos cuarenta y uno.", ["https://x"])
+        server.saber.responder = lambda p: ("Fue en mil novecientos cuarenta y uno.", ["https://x"])
         asyncio.run(server._responder(WS(), "¿cuándo empezó?"))
         # Con documentos, la frecuente tiene que ganarles a ellos, no sólo a UMBRAL.
         assert umbrales == [0.7], umbrales
@@ -505,14 +505,14 @@ def test_si_no_hay_frecuente_contesta_el_llm_y_si_no_el_respaldo():
 
         # El LLM no sabe: suena el respaldo grabado, sin fuentes.
         mandados.clear()
-        server.saber.responder = lambda p, ia=False: (None, [])
+        server.saber.responder = lambda p: (None, [])
         asyncio.run(server._responder(WS(), "¿qué hora es?"))
         textos = [m for m in mandados if m["tipo"] == "texto"]
         assert textos[0]["texto"] == "No te entendí bien.", textos
 
         # La voz en vivo falla: la respuesta queda escrita, no se pierde.
         mandados.clear()
-        server.saber.responder = lambda p, ia=False: ("Fue en mil novecientos cuarenta y uno.", ["https://x"])
+        server.saber.responder = lambda p: ("Fue en mil novecientos cuarenta y uno.", ["https://x"])
         server.vivo.sintetizar = lambda frase: 1 / 0
         asyncio.run(server._responder(WS(), "¿cuándo empezó?"))
         assert mandados[-1] == {"tipo": "error", "texto": "Fue en mil novecientos cuarenta y uno."}
@@ -521,38 +521,47 @@ def test_si_no_hay_frecuente_contesta_el_llm_y_si_no_el_respaldo():
          server.saber.disponible, server.saber.responder, server.vivo.sintetizar) = reales
 
 
-def test_el_switch_ia_pregunta_a_claude_aunque_no_haya_documentos():
-    # Sin el switch, una pregunta sin documentos parecidos es «no te entendí»
-    # sin gastar el LLM. Con él, contesta Claude igual; y si Claude se niega o
-    # se corta, no se dice media respuesta.
+def test_con_el_switch_ia_contesta_claude_y_nada_local():
+    # Con el switch «IA», ni frecuentes grabadas, ni documentos, ni LLM local:
+    # hasta un badge va a Claude, y lo que diga suena con la voz en vivo. Si
+    # Claude se niega o se corta, no se dice media respuesta.
+    import asyncio
     from types import SimpleNamespace
 
     import gabriela.saber as saber
+    import gabriela.server as server
 
-    pedidos = []
+    pedidos, mandados = [], []
+
+    class WS:
+        async def send_json(self, m):
+            mandados.append(m)
 
     def respuesta(stop_reason, texto):
-        bloque = SimpleNamespace(type="text", text=texto)
-        return SimpleNamespace(stop_reason=stop_reason, content=[bloque])
+        return SimpleNamespace(stop_reason=stop_reason,
+                               content=[SimpleNamespace(type="text", text=texto)])
 
     claude = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: pedidos.append(kw)
                                                       or respuesta(*salida)))
-    reales = saber.buscar, saber._claude, saber._modelo
-    saber.buscar = lambda p, k=None: []
+    prohibido = lambda *a, **k: 1 / 0  # noqa: E731
+    reales = (saber._claude, server.frecuentes, server.respaldo, saber.buscar,
+              saber.responder, server.vivo.sintetizar)
     saber._claude = lambda: claude
-    saber._modelo = lambda: 1 / 0  # el local no se toca en ninguno de los dos casos
+    server.frecuentes = server.respaldo = saber.buscar = saber.responder = prohibido
+    server.vivo.sintetizar = lambda frase: b"\x00\x00" * 16_000
     try:
-        salida = ("end_turn", "No llevo reloj.\n Mira el de la entrada.")
-        assert saber.responder("¿qué hora es?") == (None, [])
-        assert pedidos == []
-        assert saber.responder("¿qué hora es?", ia=True) == (
-            "No llevo reloj. Mira el de la entrada.", [])
+        salida = ("end_turn", "Esta casa fue escuela.\n Mira a tu alrededor.")
+        asyncio.run(server._responder(WS(), "¿Qué fue este edificio?", ia=True))
         assert pedidos[0]["model"] == saber.IA_MODELO
-        assert "(ninguno)" in pedidos[0]["messages"][0]["content"]
+        assert pedidos[0]["messages"] == [{"role": "user", "content": "¿Qué fue este edificio?"}]
+        textos = [m for m in mandados if m["tipo"] == "texto"]
+        assert textos[0]["texto"] == "Esta casa fue escuela. Mira a tu alrededor.", textos
+        assert mandados[-1]["tipo"] == "habla" and mandados[-1]["fin"], mandados[-1]
         salida = ("refusal", "Eso no")
-        assert saber.responder("¿qué hora es?", ia=True) == (None, [])
+        assert saber.responder_ia("¿qué hora es?") is None
     finally:
-        saber.buscar, saber._claude, saber._modelo = reales
+        (saber._claude, server.frecuentes, server.respaldo, saber.buscar,
+         saber.responder, server.vivo.sintetizar) = reales
 
 
 def test_el_corpus_se_fragmenta_sin_perder_texto_ni_pasarse():

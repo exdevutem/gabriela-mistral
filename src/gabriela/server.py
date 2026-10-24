@@ -5,7 +5,8 @@ frecuentes (entender.py) y, si una se parece, suena su respuesta grabada:
 siempre la misma, verificada y al instante. Si ninguna se parece, un LLM local
 contesta con los documentos oficiales del museo (saber.py) y lo dice con la voz
 en vivo (vivo.py); si tampoco ahí hay nada, suena el «no te entendí» grabado.
-Con el switch «IA» de la página, ese LLM es Claude Haiku en vez del local.
+Con el switch «IA» de la página no se usa nada de eso: todo lo contesta Claude
+Haiku, y sólo la voz (y Whisper, si habló al micrófono) sigue siendo local.
 """
 from __future__ import annotations
 
@@ -119,17 +120,36 @@ def _elegir(dicho: str, grabadas) -> str | None:
     return entender.elegir(dicho, grabadas, umbral)
 
 
+async def _responder_ia(ws: WebSocket, dicho: str) -> None:
+    """Lo que diga Claude, con la voz en vivo. Ni frecuentes ni documentos:
+    con el switch «IA» encendido, hasta un badge lo contesta Claude."""
+    await ws.send_json({"tipo": "pensando"})
+    texto = await asyncio.to_thread(saber.responder_ia, dicho)
+    if not texto:
+        await ws.send_json({"tipo": "error", "texto": "No supe qué contestarte. "
+                                                       "Pregúntame de otra forma."})
+        return
+    try:
+        await _decir(ws, texto)
+    except Exception:
+        log.exception("no pude decir la respuesta de Claude")
+        await ws.send_json({"tipo": "error", "texto": texto})
+
+
 async def _responder(ws: WebSocket, dicho: str, ia: bool = False) -> None:
     """Hace sonar la frecuente que corresponde a `dicho`; si no hay, lo que
-    digan los documentos del museo (con `ia`, lo que diga Claude); y si
-    tampoco, el respaldo."""
+    digan los documentos del museo; y si tampoco, el respaldo. Con `ia`, todo
+    lo contesta Claude."""
+    if ia:
+        await _responder_ia(ws, dicho)
+        return
     grabadas = frecuentes()
     # Un badge manda la pregunta tal cual: no hace falta preguntarle a nadie.
     pregunta = dicho if dicho in grabadas else await asyncio.to_thread(_elegir, dicho, grabadas)
-    if pregunta is None and (ia or saber.disponible()):
+    if pregunta is None and saber.disponible():
         await ws.send_json({"tipo": "pensando"})
         try:
-            texto, fuentes = await asyncio.to_thread(saber.responder, dicho, ia)
+            texto, fuentes = await asyncio.to_thread(saber.responder, dicho)
         except Exception:
             # Sin LLM (no se pudo cargar) queda el respaldo grabado, como antes.
             log.exception("el LLM no pudo responder")
@@ -183,7 +203,7 @@ async def conversar(ws: WebSocket) -> None:
     """Mensajes de texto, en JSON:
 
     - `{"tipo": "pregunta", "texto": …, "ia": bool}`: escrita, o un badge.
-      `ia` es el switch de la página: lo que no es frecuente lo contesta Claude.
+      `ia` es el switch de la página: todo lo contesta Claude.
     - `{"tipo": "decir", "texto": …}`: que lo diga con su voz, en vivo.
     - `{"tipo": "fin", "ia": bool}`: el visitante terminó de hablar al micrófono.
 

@@ -36,7 +36,7 @@
   #microfono { background: transparent; color: var(--tinta); border: 1px solid #7a6a55; }
   #microfono[aria-pressed="true"] { background: #a5523f; border-color: #a5523f; color: var(--tinta); }
   #microfono[hidden] { display: none; }
-  /* Switch «IA»: encendido, lo que no es frecuente lo contesta Claude Haiku.
+  /* Switch «IA»: encendido, todo lo contesta Claude Haiku, badges incluidos.
      Sólo aparece si el servidor tiene la clave. */
   #interruptor { display: flex; align-items: center; gap: .4rem; cursor: pointer;
                  font-size: .9rem; color: var(--tenue); user-select: none; }
@@ -104,7 +104,7 @@
       <input id="entrada" autocomplete="off" autofocus
              placeholder="Pregúntale algo…" aria-label="Tu mensaje">
       <button id="microfono" type="button" aria-pressed="false" hidden>Hablarle</button>
-      <label id="interruptor" title="Lo que no está entre las preguntas frecuentes lo contesta Claude Haiku" hidden>
+      <label id="interruptor" title="Todo lo contesta Claude Haiku, también los badges" hidden>
         <input id="ia" type="checkbox" role="switch"><span>IA</span>
       </label>
       <button id="enviar" type="submit">Preguntar</button>

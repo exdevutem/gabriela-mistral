@@ -43,13 +43,14 @@ texto o badge ──────────────────┘         
   Gabriela: La voz de la Maestra*, ver «Lo que sabe» más abajo— con el mismo
   modelo de embeddings, y le pasa los cuatro mejores fragmentos a un LLM de
   1,2B. Debajo del texto se muestran los documentos de donde salió.
-- **El switch «IA»**, junto a «Preguntar», cambia ese LLM local por Claude Haiku
-  (`claude-haiku-5-5`), con los mismos fragmentos delante. Las frecuentes siguen
-  sonando grabadas; lo demás lo escribe Haiku (~2–5 s) y lo dice la voz en vivo.
-  Contesta aunque ningún fragmento se parezca —con lo que se sabe de ella, o
-  diciendo que no lo sabe— y no pasa por el filtro de cifras del modelo local:
-  escribe los números con letras. Es de pago (~0,0002 USD por pregunta) y sólo
-  aparece si el `.env` tiene `ANTHROPIC_KEY`. Probarlo sin la página:
+- **El switch «IA»**, junto a «Preguntar», hace que todo lo conteste Claude
+  Haiku (`claude-haiku-5-5`): ni frecuentes grabadas —tampoco los badges—, ni
+  documentos, ni LLM local. Haiku escribe la respuesta (~2–5 s) con lo que sabe
+  de ella y la dice la voz en vivo; lo único local que queda es esa voz y
+  Whisper, si se le habla al micrófono. No pasa por el filtro de cifras del
+  modelo local: escribe los números con letras. Es de pago (~0,0002 USD por
+  pregunta) y sólo aparece si el `.env` tiene `ANTHROPIC_KEY`. Probarlo sin la
+  página:
   `uv run python -m gabriela.saber --ia "¿qué opinas de los exámenes?"`.
 - **Si contesta otra cosa**: el log muestra qué entendió y qué eligió
   (`gabriela.entender: «…» -> ¿…? (0.72)`). El arreglo es agregar esa forma

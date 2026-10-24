@@ -294,9 +294,9 @@ SABER_UMBRAL = float(os.getenv("SABER_UMBRAL", "0.5"))
 SABER_MARGEN = float(os.getenv("SABER_MARGEN", "0.05"))
 
 # --- IA: Claude Haiku (saber.py, sólo con el switch «IA» de la página) ---
-# Con el switch encendido, lo que no es frecuente lo contesta Claude Haiku en
-# vez del LLM local, con los mismos fragmentos delante, y suena con la voz en
-# vivo. Sin clave el switch no aparece. Es de pago (octubre de 2026: 0,10 USD
+# Con el switch encendido todo lo contesta Claude Haiku —ni frecuentes grabadas,
+# ni documentos, ni LLM local— y suena con la voz en vivo. Sin clave el switch
+# no aparece. Es de pago (octubre de 2026: 0,10 USD
 # por millón de tokens de entrada y 0,50 de salida, ~0,0002 USD por pregunta).
 # La clave ya pertenece a un workspace: no hace falta su id para llamar.
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_KEY") or os.getenv("ANTHROPIC_API_KEY", "")
