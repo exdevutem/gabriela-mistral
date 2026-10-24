@@ -58,12 +58,15 @@ def transcribir(pcm: bytes) -> str:
     x = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768
     # Whisper en silencio alucina, y en español alucina créditos de subtítulos
     # («Subtítulos realizados por la comunidad de Amara.org»). Si no hubo voz,
-    # mejor no preguntarle.
+    # mejor no preguntarle. Y cuando alucina no para hasta el tope de 448
+    # tokens: con el tono de calentar() eran 14 s de «Subtítulos en español de
+    # la Iglesia…». El visor corta a los 8 s, que no llegan a 60 tokens.
     if len(x) < SAMPLE_RATE // 4 or float(np.sqrt((x**2).mean())) < 0.003:
         return ""
     with _turno:
         salida = _whisper()({"raw": x, "sampling_rate": SAMPLE_RATE},
-                            generate_kwargs={"language": "spanish", "task": "transcribe"})
+                            generate_kwargs={"language": "spanish", "task": "transcribe",
+                                             "max_new_tokens": 96})
     return salida["text"].strip()
 
 
