@@ -15,13 +15,14 @@ import base64
 import contextlib
 import json
 import logging
+import time
 
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import entender, saber, vivo
-from .config import ASSETS, RESPALDO, UMBRAL, WEB
+from .config import ASSETS, RESPALDO, UMBRAL, VIVO_COLCHON, WEB
 from .visemes import VISEMAS, timeline
 from .voice import SAMPLE_RATE, a_wav, calentar, frecuentes, respaldo
 
@@ -177,18 +178,44 @@ async def _responder(ws: WebSocket, dicho: str, ia: bool = False) -> None:
 async def _decir(ws: WebSocket, texto: str, fuentes: list[str] | None = None) -> None:
     """Dice `texto` con su voz, sintetizada al momento.
 
-    Manda una `habla` por unidad según se sintetiza: el visor las encadena, así
-    que empieza a sonar la primera mientras se hacen las demás. De dónde sale el
-    texto (quien lo mande, o el LLM de saber.py) no es asunto de este camino;
-    `fuentes` son las URL de los documentos de donde salió, para mostrarlas.
+    Transmite el audio por unidades, que el visor encadena, pero con un colchón
+    al principio: no manda nada hasta que lo ya sintetizado alcance a cubrir lo
+    que falta, al ritmo medido en esta misma respuesta (`_alcanza`). Una unidad
+    larga, o una que el juez de vivo.py manda a repetir, tarda más de lo que
+    dura la anterior, y sin colchón la voz se cortaba a media respuesta. Desde
+    que empieza, cada unidad sale apenas está lista. El texto sale junto con el
+    primer audio: mientras tanto el visor sigue mostrando que piensa, en vez de
+    un texto que no suena.
+
+    De dónde sale el texto (quien lo mande, o un LLM de saber.py) no es asunto
+    de este camino; `fuentes` son las URL de los documentos de donde salió.
     """
     unidades = vivo.unidades(texto)
-    await ws.send_json({"tipo": "texto", "texto": " ".join(unidades),
-                        "fuentes": fuentes or []})
+    total, hecho, t0 = sum(map(len, unidades)), 0, time.monotonic()
+    pendientes: list[tuple[str, bytes]] = []
+    enviadas = 0
     for i, frase in enumerate(unidades):
         pcm = await asyncio.to_thread(vivo.sintetizar, frase)
-        await ws.send_json(_habla([(frase, pcm)], continuacion=i > 0,
-                                  fin=i == len(unidades) - 1))
+        pendientes.append((frase, pcm))
+        hecho += len(frase)
+        ultima = i == len(unidades) - 1
+        if not enviadas and not ultima:
+            colchon = sum(len(p) for _, p in pendientes) / 2 / SAMPLE_RATE
+            if not _alcanza(colchon, time.monotonic() - t0, hecho, total - hecho):
+                continue
+        if not enviadas:
+            await ws.send_json({"tipo": "texto", "texto": " ".join(unidades),
+                                "fuentes": fuentes or []})
+        await ws.send_json(_habla(pendientes, continuacion=enviadas > 0, fin=ultima))
+        enviadas += 1
+        pendientes = []
+
+
+def _alcanza(colchon: float, sintesis: float, hecho: int, falta: int) -> bool:
+    """Si `colchon` segundos de audio cubren lo que falta sintetizar (`falta`
+    caracteres), al ritmo de `sintesis` segundos por `hecho` caracteres que
+    lleva esta respuesta, con VIVO_COLCHON de margen."""
+    return colchon >= falta * sintesis / hecho * VIVO_COLCHON
 
 
 async def _parcial(ws: WebSocket, pcm: bytes) -> None:

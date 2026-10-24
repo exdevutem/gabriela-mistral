@@ -373,3 +373,9 @@ VIVO_DEVICE = os.getenv("VIVO_DEVICE", "auto")
 # hasta esta cantidad de veces en total. Cada repetición cuesta ~0,3 s por
 # segundo de audio; sin esto, la «voz de hombre» de NeuTTS llega al visitante.
 VIVO_INTENTOS = int(os.getenv("VIVO_INTENTOS", "3"))
+# Antes de que empiece a sonar se junta audio hasta que alcance a cubrir lo que
+# falta por sintetizar, al ritmo medido en esa misma respuesta y multiplicado
+# por esto: mejor esperar al principio que cortarse a media respuesta. Subirlo
+# si todavía se corta (p. ej. con la GPU compartida); bajarlo si la espera
+# inicial se hace larga.
+VIVO_COLCHON = float(os.getenv("VIVO_COLCHON", "1.3"))

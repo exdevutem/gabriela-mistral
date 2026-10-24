@@ -569,6 +569,49 @@ def test_con_el_switch_ia_contesta_claude_y_nada_local():
          saber.responder, server.vivo.sintetizar) = reales
 
 
+def test_la_voz_en_vivo_espera_al_principio_y_no_se_corta_al_medio():
+    # Si sintetizar va más lento que hablar, el audio se junta antes de mandar
+    # nada: mejor una espera al principio que una pausa a media respuesta. Si va
+    # rápido, la primera unidad sale enseguida y las demás según se hacen.
+    import asyncio
+    from types import SimpleNamespace
+
+    import gabriela.server as server
+
+    un_segundo = b"\x00\x00" * SAMPLE_RATE
+    ahora = [0.0]
+    texto = "Primera frase de la respuesta. Segunda frase, bastante más larga que la primera. Tercera."
+
+    def hablas(segundos_por_unidad):
+        mandados = []
+
+        class WS:
+            async def send_json(self, m):
+                mandados.append(m)
+
+        def sintetizar(frase):
+            ahora[0] += segundos_por_unidad
+            return un_segundo
+
+        reales = server.vivo.sintetizar, server.time
+        server.vivo.sintetizar = sintetizar
+        server.time = SimpleNamespace(monotonic=lambda: ahora[0])
+        try:
+            asyncio.run(server._decir(WS(), texto))
+        finally:
+            server.vivo.sintetizar, server.time = reales
+        return [m for m in mandados if m["tipo"] == "habla"]
+
+    unidades = server.vivo.unidades(texto)
+    assert len(unidades) == 3, unidades
+    resumen = lambda hs: [(h["duracion"], h["continuacion"], h["fin"]) for h in hs]  # noqa: E731
+    # 10 s de síntesis por cada segundo de voz: nunca alcanza, sale todo junto.
+    assert resumen(hablas(10.0)) == [(3.0, False, True)], resumen(hablas(10.0))
+    rapido = resumen(hablas(0.1))
+    assert rapido == [(1.0, False, False), (1.0, True, False), (1.0, True, True)], rapido
+    assert server._alcanza(3.0, 1.0, 10, 20) and not server._alcanza(2.0, 1.0, 10, 20)
+
+
 def test_el_corpus_se_fragmenta_sin_perder_texto_ni_pasarse():
     sys.path.insert(0, "pipeline")
     from conocimiento import CORTO, LARGO, fragmentar

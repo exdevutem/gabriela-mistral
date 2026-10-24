@@ -118,7 +118,12 @@ decir, no alcanzaba a hablar en vivo.
 
 El texto se parte en unidades (la primera, en su primera coma si es larga) y se
 manda una `habla` por unidad según se sintetiza; el visor las encadena, así que
-suena la primera mientras se hacen las demás. Cada toma se puntúa con el mismo
+suena la primera mientras se hacen las demás. Pero no empieza hasta que lo ya
+sintetizado alcance a cubrir lo que falta, al ritmo medido en esa respuesta y con
+`VIVO_COLCHON` de margen: una unidad larga o repetida tardaba más de lo que duraba
+la anterior y la voz se cortaba a media respuesta. Mejor esperar al principio,
+con la página turnando frases como «Consultando los libros…». Medido con Haiku y
+tres preguntas: primer sonido entre 4 y 6 s y ningún corte. Cada toma se puntúa con el mismo
 juez que las grabadas y, si suena a otra voz, se repite más fría
 (`VIVO_INTENTOS`). Probada con una frase de 11 s: Whisper la transcribe tal cual y
 el tono cae a 8 Hz del de la referencia (nota 0,95).
