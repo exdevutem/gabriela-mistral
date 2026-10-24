@@ -28,6 +28,9 @@ dependencies = [
     "anthropic>=2.3.0",
 ]
 
+[project.scripts]
+gabriela = "gabriela.__main__:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -43,17 +43,17 @@ texto o badge ──────────────────┘         
   Gabriela: La voz de la Maestra*, ver «Lo que sabe» más abajo— con el mismo
   modelo de embeddings, y le pasa los cuatro mejores fragmentos a un LLM de
   1,2B. Debajo del texto se muestran los documentos de donde salió.
-- **El switch «IA»**, junto a «Preguntar», hace que todo lo conteste Claude
-  Haiku (`claude-haiku-5-5`): ni frecuentes grabadas —tampoco los badges—, ni
-  documentos, ni LLM local. Haiku escribe la respuesta (~2–5 s) y la dice la voz
-  en vivo. Para que no invente datos del museo, su prompt lleva fijas las
-  respuestas verificadas de `FRECUENTES`, que mandan sobre lo que él crea saber
-  (sin ellas confundía el edificio con la Escuela Normal de Preceptores); lo
-  único local que queda es esa voz y Whisper, si se le habla al micrófono. No
-  pasa por el filtro de cifras del modelo local: escribe los números con letras.
-  Es de pago (~0,0002 USD por pregunta) y sólo aparece si el `.env` tiene
-  `ANTHROPIC_KEY`. Probarlo sin la página:
-  `uv run python -m gabriela.saber --ia "¿qué opinas de los exámenes?"`.
+- **El modo IA** (`uv run gabriela --ia`) hace que todo lo conteste Claude Haiku
+  (`claude-haiku-5-5`): ni frecuentes grabadas —tampoco los badges, que quedan
+  como sugerencias—, ni documentos, ni LLM local, que ni se cargan: al arrancar
+  sólo se cargan Whisper, para el micrófono, y la voz en vivo. Haiku escribe la
+  respuesta (~2–5 s) y la dice esa voz. Para que no invente datos del museo, su
+  prompt lleva fijas las respuestas verificadas de `FRECUENTES`, que mandan
+  sobre lo que él crea saber (sin ellas confundía el edificio con la Escuela
+  Normal de Preceptores). No pasa por el filtro de cifras del modelo local:
+  escribe los números con letras. Es de pago (~0,0003 USD por pregunta) y no
+  arranca sin `ANTHROPIC_KEY` en el `.env`. Probarlo sin la página: `uv run
+  python -m gabriela.saber --ia "¿qué opinas de los exámenes?"`.
 - **Si contesta otra cosa**: el log muestra qué entendió y qué eligió
   (`gabriela.entender: «…» -> ¿…? (0.72)`). El arreglo es agregar esa forma
   de preguntar a `VARIANTES`.
@@ -75,7 +75,7 @@ energía acumulada, no según tiempo, así que las pausas del TTS no desfasan la
 ## Requisitos
 
 Todo corre en local; no hace falta ninguna clave de API (salvo `ANTHROPIC_KEY`
-para el switch «IA», que es opcional).
+para el modo IA, que es opcional).
 
 - Python 3.13 y [uv](https://docs.astral.sh/uv/)
 - Una voz de referencia en `assets/voz/` para NeuTTS (ver más abajo), y en macOS
@@ -200,12 +200,17 @@ pero sí la fecha inventada, que es lo que un modelo así inventa más.
 ## Puesta en marcha
 
 ```bash
-uv run uvicorn gabriela.server:app --port 8000
+uv run gabriela          # todo local
+uv run gabriela --ia     # todo lo contesta Claude Haiku; lo local no se carga
 ```
 
-El primer arranque graba las respuestas que falten con NeuTTS (unos siete
-minutos si no hay ninguna) y carga Whisper. Los siguientes sólo cargan Whisper:
-si todo está grabado, NeuTTS ni se abre.
+`--port` y `--host` cambian dónde escucha (por defecto `127.0.0.1:8000`). Con
+uvicorn a mano, o en Docker, `MODO=ia` hace lo mismo que `--ia`.
+
+En modo local, el primer arranque graba las respuestas que falten con NeuTTS
+(unos siete minutos si no hay ninguna) y carga Whisper. Los siguientes sólo
+cargan Whisper: si todo está grabado, NeuTTS ni se abre. En modo IA no se graba
+nada: sólo se cargan Whisper y la voz en vivo.
 
 - `http://localhost:8000` — la conversación
 - `http://localhost:8000/debug` — un slider por morph target, para afinar visemas

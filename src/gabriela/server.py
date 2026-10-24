@@ -5,8 +5,9 @@ frecuentes (entender.py) y, si una se parece, suena su respuesta grabada:
 siempre la misma, verificada y al instante. Si ninguna se parece, un LLM local
 contesta con los documentos oficiales del museo (saber.py) y lo dice con la voz
 en vivo (vivo.py); si tampoco ahí hay nada, suena el «no te entendí» grabado.
-Con el switch «IA» de la página no se usa nada de eso: todo lo contesta Claude
-Haiku, y sólo la voz (y Whisper, si habló al micrófono) sigue siendo local.
+Arrancado en modo IA (`gabriela --ia`) no se usa ni se carga nada de eso: todo
+lo contesta Claude Haiku, y sólo la voz (y Whisper, si habló al micrófono)
+sigue siendo local.
 """
 from __future__ import annotations
 
@@ -21,8 +22,8 @@ from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import entender, saber, vivo
-from .config import ASSETS, RESPALDO, UMBRAL, VIVO_COLCHON, WEB
+from . import config, entender, saber, vivo
+from .config import ANTHROPIC_KEY, ASSETS, FRECUENTES, RESPALDO, UMBRAL, VIVO_COLCHON, WEB
 from .visemes import VISEMAS, timeline
 from .voice import SAMPLE_RATE, a_wav, calentar, frecuentes, respaldo
 
@@ -42,12 +43,21 @@ async def ciclo(_app):
 
     Grabar es largo sólo la primera vez (unos siete minutos con NeuTTS); después
     queda en disco. Whisper y el elector son ~1,5 GB que no deben cargarse con
-    alguien hablándole.
+    alguien hablándole. En modo IA no se graba ni se carga nada de lo local:
+    sólo Whisper, para el micrófono, y la voz en vivo.
     """
-    for nombre, paso in (("grabar las respuestas", calentar),
-                         ("cargar Whisper y el elector", entender.calentar),
-                         ("cargar los documentos y el LLM", saber.calentar),
-                         ("cargar la voz en vivo", vivo.calentar)):
+    if config.IA:
+        if not ANTHROPIC_KEY:
+            raise RuntimeError("el modo IA necesita ANTHROPIC_KEY en el .env")
+        log.info("modo IA: contesta %s; no se carga el modelo local", saber.IA_MODELO)
+        pasos = (("cargar Whisper", lambda: entender.calentar(elector=False)),
+                 ("cargar la voz en vivo", vivo.calentar))
+    else:
+        pasos = (("grabar las respuestas", calentar),
+                 ("cargar Whisper y el elector", entender.calentar),
+                 ("cargar los documentos y el LLM", saber.calentar),
+                 ("cargar la voz en vivo", vivo.calentar))
+    for nombre, paso in pasos:
         try:
             log.info("preparando: %s…", nombre)
             await asyncio.to_thread(paso)
@@ -123,7 +133,7 @@ def _elegir(dicho: str, grabadas) -> str | None:
 
 async def _responder_ia(ws: WebSocket, dicho: str) -> None:
     """Lo que diga Claude, con la voz en vivo. Ni frecuentes ni documentos:
-    con el switch «IA» encendido, hasta un badge lo contesta Claude."""
+    en modo IA, hasta un badge lo contesta Claude."""
     await ws.send_json({"tipo": "pensando"})
     texto = await asyncio.to_thread(saber.responder_ia, dicho)
     if not texto:
@@ -137,11 +147,11 @@ async def _responder_ia(ws: WebSocket, dicho: str) -> None:
         await ws.send_json({"tipo": "error", "texto": texto})
 
 
-async def _responder(ws: WebSocket, dicho: str, ia: bool = False) -> None:
+async def _responder(ws: WebSocket, dicho: str) -> None:
     """Hace sonar la frecuente que corresponde a `dicho`; si no hay, lo que
-    digan los documentos del museo; y si tampoco, el respaldo. Con `ia`, todo
-    lo contesta Claude."""
-    if ia:
+    digan los documentos del museo; y si tampoco, el respaldo. En modo IA,
+    todo lo contesta Claude."""
+    if config.IA:
         await _responder_ia(ws, dicho)
         return
     grabadas = frecuentes()
@@ -229,10 +239,9 @@ async def _parcial(ws: WebSocket, pcm: bytes) -> None:
 async def conversar(ws: WebSocket) -> None:
     """Mensajes de texto, en JSON:
 
-    - `{"tipo": "pregunta", "texto": …, "ia": bool}`: escrita, o un badge.
-      `ia` es el switch de la página: todo lo contesta Claude.
+    - `{"tipo": "pregunta", "texto": …}`: escrita, o un badge.
     - `{"tipo": "decir", "texto": …}`: que lo diga con su voz, en vivo.
-    - `{"tipo": "fin", "ia": bool}`: el visitante terminó de hablar al micrófono.
+    - `{"tipo": "fin"}`: el visitante terminó de hablar al micrófono.
 
     Mensajes binarios: trozos de lo que va diciendo, PCM de 16 bits mono a
     16 kHz. Mientras llegan se transcribe lo acumulado y se devuelve como
@@ -240,10 +249,10 @@ async def conversar(ws: WebSocket) -> None:
     """
     await ws.accept()
     # Sólo se ofrecen las que están grabadas: un badge que lleva a una respuesta
-    # a medio grabar es peor que no ofrecerlo.
-    await ws.send_json({"tipo": "listo", "visemas": VISEMAS,
-                        "frecuentes": list(frecuentes()),
-                        "ia": saber.ia_disponible()})
+    # a medio grabar es peor que no ofrecerlo. En modo IA no se graba nada y
+    # los badges son sugerencias que contesta Claude.
+    badges = [p for p, _ in FRECUENTES] if config.IA else list(frecuentes())
+    await ws.send_json({"tipo": "listo", "visemas": VISEMAS, "frecuentes": badges})
     voz = bytearray()
     parcial: asyncio.Task | None = None
     while True:
@@ -261,7 +270,6 @@ async def conversar(ws: WebSocket) -> None:
                     parcial = asyncio.create_task(_parcial(ws, bytes(voz)))
                 continue
             msg = json.loads(m.get("text") or "{}")
-            ia = bool(msg.get("ia")) and saber.ia_disponible()
             if msg.get("tipo") == "decir":
                 if texto := (msg.get("texto") or "").strip()[:MAX_DECIR]:
                     await _decir(ws, texto)
@@ -277,7 +285,7 @@ async def conversar(ws: WebSocket) -> None:
                 dicho = (msg.get("texto") or "").strip()
                 if not dicho:
                     continue
-            await _responder(ws, dicho, ia)
+            await _responder(ws, dicho)
         except Exception:
             log.exception("falló la respuesta")
             await ws.send_json({"tipo": "error",

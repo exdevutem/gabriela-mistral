@@ -16,8 +16,8 @@ llama.cpp, contesta con lo que dicen esos fragmentos:
    que un «no te entendí». Es el único dato que se puede comprobar sin
    entender el texto, y es justo el que un modelo pequeño inventa.
 
-Con el switch «IA» de la página no pasa nada de esto: responder_ia() le
-pregunta directo a Claude Haiku, sin fragmentos ni modelo local.
+En modo IA (`gabriela --ia`) no pasa nada de esto: responder_ia() le pregunta
+directo a Claude Haiku, sin fragmentos ni modelo local.
 
     uv run python -m gabriela.saber "¿qué es la exposición retrospectiva?"
     uv run python -m gabriela.saber --ia "¿qué opinas de los exámenes?"
@@ -56,7 +56,7 @@ SISTEMA = (
     "ofrezcas hacer nada por el visitante: sólo cuentas lo que sabes. "
     f"Si los fragmentos no responden la pregunta, contesta sólo {NO_SE}."
 )
-# Con el switch «IA» contesta Claude solo, sin fragmentos. Lo que no se le deja
+# En modo IA contesta Claude solo, sin fragmentos. Lo que no se le deja
 # es inventar: lleva fijas las respuestas verificadas de FRECUENTES, que mandan
 # sobre lo que él crea saber. Sin ellas confundía el edificio con la Escuela
 # Normal de Preceptores.
@@ -258,11 +258,6 @@ def calentar() -> None:
 
 def disponible() -> bool:
     return bool(_fragmentos()) and bool(LLM_GGUF)
-
-
-def ia_disponible() -> bool:
-    """Si se puede ofrecer el switch «IA»: basta con la clave."""
-    return bool(ANTHROPIC_KEY)
 
 
 if __name__ == "__main__":

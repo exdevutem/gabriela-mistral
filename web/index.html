@@ -36,22 +36,6 @@
   #microfono { background: transparent; color: var(--tinta); border: 1px solid #7a6a55; }
   #microfono[aria-pressed="true"] { background: #a5523f; border-color: #a5523f; color: var(--tinta); }
   #microfono[hidden] { display: none; }
-  /* Switch «IA»: encendido, todo lo contesta Claude Haiku, badges incluidos.
-     Sólo aparece si el servidor tiene la clave. */
-  #interruptor { display: flex; align-items: center; gap: .4rem; cursor: pointer;
-                 font-size: .9rem; color: var(--tenue); user-select: none; }
-  #interruptor[hidden] { display: none; }
-  #ia { appearance: none; margin: 0; width: 2.3rem; height: 1.3rem; flex: none;
-        border-radius: 1rem; background: #352d28; position: relative; cursor: pointer;
-        transition: background .15s; }
-  #ia::before { content: ''; position: absolute; top: .15rem; left: .15rem;
-                width: 1rem; height: 1rem; border-radius: 50%; background: var(--tinta);
-                transition: transform .15s; }
-  #ia:checked { background: #7a6a55; }
-  #ia:checked::before { transform: translateX(1rem); }
-  #ia:focus-visible { outline: 2px solid #7a6a55; outline-offset: 2px; }
-  #ia:checked + span { color: var(--tinta); }
-  @media (prefers-reduced-motion: reduce) { #ia, #ia::before { transition: none; } }
   #aviso { margin: 0; font-size: .78rem; color: var(--tenue); text-align: center; }
   /* Preguntas frecuentes: una sola fila que se arrastra. En vertical ocuparían
      cuatro filas y le comerían la cara, que es lo que la gente vino a ver. */
@@ -104,9 +88,6 @@
       <input id="entrada" autocomplete="off" autofocus
              placeholder="Pregúntale algo…" aria-label="Tu mensaje">
       <button id="microfono" type="button" aria-pressed="false" hidden>Hablarle</button>
-      <label id="interruptor" title="Todo lo contesta Claude Haiku, también los badges" hidden>
-        <input id="ia" type="checkbox" role="switch"><span>IA</span>
-      </label>
       <button id="enviar" type="submit">Preguntar</button>
     </form>
     <p id="aviso">Recreación con inteligencia artificial. No es una grabación
@@ -123,8 +104,6 @@ const forma = document.getElementById('forma');
 const badges = document.getElementById('badges');
 const microfono = document.getElementById('microfono');
 const fuentes = document.getElementById('fuentes');
-const interruptor = document.getElementById('interruptor');
-const ia = document.getElementById('ia');
 
 // Sin try, un GLB que falta o viene corrupto aborta el módulo entero: no se
 // crea el WebSocket, no se registra ningún handler y el kiosco queda negro y
@@ -235,7 +214,6 @@ function alMensaje({ data }) {
     // Se reconecta sola, y el servidor manda 'listo' en cada conexión: sin
     // vaciar, cada corte de red dejaría otra copia entera de la fila.
     badges.replaceChildren();
-    interruptor.hidden = !m.ia;
     // Sólo llegan las que tienen la respuesta ya grabada, así que un badge
     // siempre responde al instante.
     for (const pregunta of m.frecuentes || []) {
@@ -302,8 +280,7 @@ function preguntar(texto) {
   fuentes.hidden = true;
   // «/decir …» prueba la voz en vivo: lo dice tal cual, sin elegir respuesta.
   const decir = texto.match(/^\/decir\s+(.+)/s);
-  ws.send(JSON.stringify(decir ? { tipo: 'decir', texto: decir[1] }
-                               : { tipo: 'pregunta', texto, ia: ia.checked }));
+  ws.send(JSON.stringify(decir ? { tipo: 'decir', texto: decir[1] } : { tipo: 'pregunta', texto }));
   entrada.value = '';
   ocupado(true);
 }
@@ -375,7 +352,7 @@ function terminar() {
   enviarResto();
   flujo.getTracks().forEach((t) => t.stop());
   ctx.close();
-  ws.send(JSON.stringify({ tipo: 'fin', ia: ia.checked }));
+  ws.send(JSON.stringify({ tipo: 'fin' }));
   microfono.setAttribute('aria-pressed', 'false');
   microfono.textContent = 'Hablarle';
   ocupado(true);

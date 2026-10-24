@@ -293,10 +293,12 @@ SABER_UMBRAL = float(os.getenv("SABER_UMBRAL", "0.5"))
 # contestar ella con lo grabado. Ver saber.piso().
 SABER_MARGEN = float(os.getenv("SABER_MARGEN", "0.05"))
 
-# --- IA: Claude Haiku (saber.py, sólo con el switch «IA» de la página) ---
-# Con el switch encendido todo lo contesta Claude Haiku —ni frecuentes grabadas,
-# ni documentos, ni LLM local— y suena con la voz en vivo. Sin clave el switch
-# no aparece. Es de pago (octubre de 2026: 0,10 USD
+# --- IA: Claude Haiku (saber.py, sólo arrancando con `gabriela --ia`) ---
+# En modo IA todo lo contesta Claude Haiku —ni frecuentes grabadas, ni
+# documentos, ni LLM local, que ni se cargan— y suena con la voz en vivo. Se
+# elige al arrancar (ver __main__.py); MODO=ia sirve para uvicorn a mano o Docker.
+IA = os.getenv("MODO", "local") == "ia"
+# Sin clave, el modo IA no arranca. Es de pago (octubre de 2026: 0,10 USD
 # por millón de tokens de entrada y 0,50 de salida, ~0,0002 USD por pregunta).
 # La clave ya pertenece a un workspace: no hace falta su id para llamar.
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_KEY") or os.getenv("ANTHROPIC_API_KEY", "")

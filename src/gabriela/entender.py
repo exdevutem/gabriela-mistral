@@ -130,10 +130,12 @@ def elegir(texto: str, disponibles, umbral: float = UMBRAL) -> str | None:
     return preguntas[i] if i is not None else None
 
 
-def calentar() -> None:
+def calentar(elector: bool = True) -> None:
     """Carga los dos modelos antes de la primera visita: Whisper son ~1 GB y
-    tarda unos segundos, que no deben pagarse con alguien hablándole."""
-    _indice()
+    tarda unos segundos, que no deben pagarse con alguien hablándole. Sin
+    `elector` (modo IA), sólo Whisper."""
+    if elector:
+        _indice()
     transcribir((np.sin(np.arange(SAMPLE_RATE) / 8) * 3000).astype("<i2").tobytes())
 
 

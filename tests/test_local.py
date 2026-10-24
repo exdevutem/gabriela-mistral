@@ -521,10 +521,11 @@ def test_si_no_hay_frecuente_contesta_el_llm_y_si_no_el_respaldo():
          server.saber.disponible, server.saber.responder, server.vivo.sintetizar) = reales
 
 
-def test_con_el_switch_ia_contesta_claude_y_nada_local():
-    # Con el switch «IA», ni frecuentes grabadas, ni documentos, ni LLM local:
-    # hasta un badge va a Claude, y lo que diga suena con la voz en vivo. Si
-    # Claude se niega o se corta, no se dice media respuesta.
+def test_en_modo_ia_contesta_claude_y_no_carga_nada_local():
+    # En modo IA (gabriela --ia), ni frecuentes grabadas, ni documentos, ni LLM
+    # local: ni se cargan al arrancar, y hasta un badge va a Claude, que suena
+    # con la voz en vivo. Si Claude se niega o se corta, no se dice media
+    # respuesta.
     import asyncio
     from types import SimpleNamespace
 
@@ -544,14 +545,27 @@ def test_con_el_switch_ia_contesta_claude_y_nada_local():
     claude = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: pedidos.append(kw)
                                                       or respuesta(*salida)))
     prohibido = lambda *a, **k: 1 / 0  # noqa: E731
+    cargados = []
     reales = (saber._claude, server.frecuentes, server.respaldo, saber.buscar,
-              saber.responder, server.vivo.sintetizar)
+              saber.responder, server.vivo.sintetizar, server.config.IA, server.calentar,
+              saber.calentar, server.entender.calentar, server.vivo.calentar, server.ANTHROPIC_KEY)
     saber._claude = lambda: claude
     server.frecuentes = server.respaldo = saber.buscar = saber.responder = prohibido
+    # Registran en vez de fallar: ciclo() atrapa las excepciones de cada paso.
+    server.calentar = lambda: cargados.append("grabar")
+    saber.calentar = lambda: cargados.append("llm")
+    server.entender.calentar = lambda elector=True: cargados.append(("whisper", elector))
+    server.vivo.calentar = lambda: cargados.append("voz")
     server.vivo.sintetizar = lambda frase: b"\x00\x00" * 16_000
+    server.config.IA, server.ANTHROPIC_KEY = True, "clave"
     try:
+        async def arrancar():
+            async with server.ciclo(None):
+                pass
+        asyncio.run(arrancar())
+        assert cargados == [("whisper", False), "voz"], cargados
         salida = ("end_turn", "Esta casa fue escuela.\n Mira a tu alrededor.")
-        asyncio.run(server._responder(WS(), "¿Qué fue este edificio?", ia=True))
+        asyncio.run(server._responder(WS(), "¿Qué fue este edificio?"))
         assert pedidos[0]["model"] == saber.IA_MODELO
         assert pedidos[0]["messages"] == [{"role": "user", "content": "¿Qué fue este edificio?"}]
         # Las respuestas verificadas van fijas en el prompt: es lo que le impide
@@ -566,7 +580,9 @@ def test_con_el_switch_ia_contesta_claude_y_nada_local():
         assert saber.responder_ia("¿qué hora es?") is None
     finally:
         (saber._claude, server.frecuentes, server.respaldo, saber.buscar,
-         saber.responder, server.vivo.sintetizar) = reales
+         saber.responder, server.vivo.sintetizar, server.config.IA, server.calentar,
+         saber.calentar, server.entender.calentar, server.vivo.calentar,
+         server.ANTHROPIC_KEY) = reales
 
 
 def test_la_voz_en_vivo_espera_al_principio_y_no_se_corta_al_medio():
