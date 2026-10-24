@@ -554,6 +554,11 @@ def test_con_el_switch_ia_contesta_claude_y_nada_local():
         asyncio.run(server._responder(WS(), "¿Qué fue este edificio?", ia=True))
         assert pedidos[0]["model"] == saber.IA_MODELO
         assert pedidos[0]["messages"] == [{"role": "user", "content": "¿Qué fue este edificio?"}]
+        # Las respuestas verificadas van fijas en el prompt: es lo que le impide
+        # inventar datos del museo.
+        sistema = pedidos[0]["system"][0]
+        assert all(r in sistema["text"] for _, r in saber.FRECUENTES)
+        assert sistema["cache_control"] == {"type": "ephemeral"}, sistema
         textos = [m for m in mandados if m["tipo"] == "texto"]
         assert textos[0]["texto"] == "Esta casa fue escuela. Mira a tu alrededor.", textos
         assert mandados[-1]["tipo"] == "habla" and mandados[-1]["fin"], mandados[-1]

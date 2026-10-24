@@ -35,7 +35,8 @@ from functools import lru_cache
 
 import numpy as np
 
-from .config import (ANTHROPIC_KEY, CONOCIMIENTO, EMBEDDINGS_MODELO, IA_ESFUERZO, IA_MODELO,
+from .config import (ANTHROPIC_KEY, CONOCIMIENTO, EMBEDDINGS_MODELO, FRECUENTES, IA_ESFUERZO,
+                     IA_MODELO,
                      LLM_CTX, LLM_DEVICE, LLM_FRAGMENTOS, LLM_GGUF, LLM_MAX_TOKENS,
                      SABER_MARGEN, SABER_UMBRAL)
 
@@ -55,8 +56,10 @@ SISTEMA = (
     "ofrezcas hacer nada por el visitante: sólo cuentas lo que sabes. "
     f"Si los fragmentos no responden la pregunta, contesta sólo {NO_SE}."
 )
-# Con el switch «IA» contesta Claude solo, con lo que sabe de ella: sin
-# fragmentos. Lo que no se le deja es inventar.
+# Con el switch «IA» contesta Claude solo, sin fragmentos. Lo que no se le deja
+# es inventar: lleva fijas las respuestas verificadas de FRECUENTES, que mandan
+# sobre lo que él crea saber. Sin ellas confundía el edificio con la Escuela
+# Normal de Preceptores.
 SISTEMA_IA = (
     "Eres Gabriela Mistral (Lucila Godoy Alcayaga, 1889-1957), maestra y poeta "
     "chilena. Un visitante del Museo de la Educación Gabriela Mistral, en "
@@ -69,7 +72,11 @@ SISTEMA_IA = (
     "contéstalo en una frase, como lo haría ella, y vuelve a la escuela o al "
     "museo. No ofrezcas hacer nada por el visitante: sólo conversas. Trátalo "
     "siempre de tú, nunca de usted («mira», no «mire»), y sin suponer si es "
-    "hombre o mujer (nada de «mijito» ni «mijita»)."
+    "hombre o mujer (nada de «mijito» ni «mijita»).\n\n"
+    "Estos son datos verificados por el museo, dichos con tu voz. Úsalos tal "
+    "cual cuando la pregunta los toque, y si algo que crees saber los "
+    "contradice, mandan ellos:\n\n"
+    + "\n".join(f"- {p} {r}" for p, r in FRECUENTES)
 )
 
 
@@ -198,7 +205,11 @@ def responder_ia(pregunta: str) -> str | None:
     """
     t = time.time()
     r = _claude().messages.create(
-        model=IA_MODELO, max_tokens=2000, system=SISTEMA_IA,
+        model=IA_MODELO, max_tokens=2000,
+        # El prompt es fijo: cacheado, cada pregunta lo relee más barato y antes.
+        # La marca va en él y no arriba, que caería en la pregunta y no
+        # reusaría nada.
+        system=[{"type": "text", "text": SISTEMA_IA, "cache_control": {"type": "ephemeral"}}],
         output_config={"effort": IA_ESFUERZO},
         messages=[{"role": "user", "content": pregunta}])
     texto = " ".join("".join(b.text for b in r.content if b.type == "text").split())

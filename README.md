@@ -45,12 +45,14 @@ texto o badge ──────────────────┘         
   1,2B. Debajo del texto se muestran los documentos de donde salió.
 - **El switch «IA»**, junto a «Preguntar», hace que todo lo conteste Claude
   Haiku (`claude-haiku-5-5`): ni frecuentes grabadas —tampoco los badges—, ni
-  documentos, ni LLM local. Haiku escribe la respuesta (~2–5 s) con lo que sabe
-  de ella y la dice la voz en vivo; lo único local que queda es esa voz y
-  Whisper, si se le habla al micrófono. No pasa por el filtro de cifras del
-  modelo local: escribe los números con letras. Es de pago (~0,0002 USD por
-  pregunta) y sólo aparece si el `.env` tiene `ANTHROPIC_KEY`. Probarlo sin la
-  página:
+  documentos, ni LLM local. Haiku escribe la respuesta (~2–5 s) y la dice la voz
+  en vivo. Para que no invente datos del museo, su prompt lleva fijas las
+  respuestas verificadas de `FRECUENTES`, que mandan sobre lo que él crea saber
+  (sin ellas confundía el edificio con la Escuela Normal de Preceptores); lo
+  único local que queda es esa voz y Whisper, si se le habla al micrófono. No
+  pasa por el filtro de cifras del modelo local: escribe los números con letras.
+  Es de pago (~0,0002 USD por pregunta) y sólo aparece si el `.env` tiene
+  `ANTHROPIC_KEY`. Probarlo sin la página:
   `uv run python -m gabriela.saber --ia "¿qué opinas de los exámenes?"`.
 - **Si contesta otra cosa**: el log muestra qué entendió y qué eligió
   (`gabriela.entender: «…» -> ¿…? (0.72)`). El arreglo es agregar esa forma
